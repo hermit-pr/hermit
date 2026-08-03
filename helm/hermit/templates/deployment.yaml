@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hermit.fullname" . }}
+  labels:
+    {{- include "hermit.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hermit.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hermit.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      serviceAccountName: {{ .Values.config.podServiceAccount }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "hermit.fullname" . }}
+          env:
+            {{- if .Values.secrets.webhookSecret.name }}
+            - name: HERMIT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.webhookSecret.name | quote }}
+                  key: {{ .Values.secrets.webhookSecret.key | required "secrets.webhookSecret.key is required" | quote }}
+            {{- end }}
+            {{- if .Values.secrets.gitReadToken.name }}
+            - name: HERMIT_GIT_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.gitReadToken.name | quote }}
+                  key: {{ .Values.secrets.gitReadToken.key | required "secrets.gitReadToken.key is required" | quote }}
+            {{- end }}
+            {{- if .Values.secrets.gitRWToken.name }}
+            - name: HERMIT_GIT_{{ if eq .Values.config.gitProvider "gitlab" }}LAB{{ else }}HUB{{ end }}_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.gitRWToken.name | quote }}
+                  key: {{ .Values.secrets.gitRWToken.key | required "secrets.gitRWToken.key is required" | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

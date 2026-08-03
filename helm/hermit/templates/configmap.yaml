@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermit.fullname" . }}
+  labels:
+    {{- include "hermit.labels" . | nindent 4 }}
+data:
+  HERMIT_GIT_PROVIDER: {{ .Values.config.gitProvider | quote }}
+  HERMIT_GIT_HOST_URL: {{ .Values.config.gitHostUrl | quote }}
+  HERMIT_VLLM_ENDPOINT: {{ .Values.config.vllmEndpoint | quote }}
+  HERMIT_MODEL: {{ .Values.config.model | quote }}
+  HERMIT_REVIEW_RULES: {{ .Values.config.reviewRules | quote }}
+  HERMIT_OPCODE_BIN: {{ .Values.config.opencodeBin | quote }}
+  HERMIT_WORKSPACE: {{ .Values.config.workspace | quote }}
+  HERMIT_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  HERMIT_PORT: {{ .Values.service.port | quote }}
+  HERMIT_MASTER_URL: {{ .Values.config.masterUrl | default (printf "http://%s:%d" (include "hermit.fullname" .) (int .Values.service.port)) | quote }}
+  HERMIT_POD_IMAGE: {{ .Values.config.podImage | default (printf "%s:%s" .Values.image.repository .Values.image.tag) | quote }}
+  HERMIT_POD_NAMESPACE: {{ .Values.config.podNamespace | quote }}
+  HERMIT_POD_SERVICE_ACCOUNT: {{ .Values.config.podServiceAccount | quote }}
+  HERMIT_REPORT_TIMEOUT_SECONDS: {{ .Values.config.reportTimeoutSeconds | quote }}
+  {{- if .Values.config.opencodeArgs }}
+  HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
+  {{- end }}

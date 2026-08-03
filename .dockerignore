@@ -1,0 +1,12 @@
+.git
+.gitignore
+.gitlab-ci.yml
+.venv
+helm
+tests
+AGENTS.md
+__pycache__
+*.pyc
+*.egg-info
+build
+dist

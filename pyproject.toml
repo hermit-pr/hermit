@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermit"
+version = "0.1.0"
+description = "H.E.R.M.I.T - Hermit Emits Reviews for Merge-requests In Total-isolation - airgapped code review bot for on-premise GitLab and GitHub"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "httpx>=0.27",
+    "kubernetes>=30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "isort",
+    "flake8",
+    "pylint",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+hermit = "hermit.main:run"
+hermit-slave = "hermit.slave:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = "/(\\.venv|\\.git|build|dist|helm)/"
+
+[tool.isort]
+profile = "black"
+line_length = 88
+skip_gitignore = true
+skip = [".venv"]
+
+[tool.pylint.main]
+max-line-length = 88
+max-positional-arguments = 6
+max-attributes = 10
+max-statements = 60
+output-format = "colorized"
+ignored-modules = ["uvicorn"]
+
+[tool.pylint."messages control"]
+disable = [
+    "duplicate-code",
+    "fixme",
+    "too-few-public-methods",
+    "too-many-arguments",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

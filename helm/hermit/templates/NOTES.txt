@@ -1,0 +1,19 @@
+H.E.R.M.I.T has been deployed as {{ include "hermit.fullname" . }}.
+
+Point your GitLab/GitHub webhook at the bot so it can publish a review on
+every PR/MR:
+
+  GitHub: POST https://<host>/webhook/github  (validate with X-Hub-Signature-256)
+  GitLab: POST https://<host>/webhook/gitlab  (validate with X-Gitlab-Token)
+
+Reviews are also triggered when someone writes "@hermit" in a PR/MR comment.
+
+No tokens are stored in the chart: secrets.webhookSecret, secrets.gitRWToken
+and secrets.gitReadToken each reference an existing Kubernetes Secret by name
+and key (same namespace). Verify those references resolve and hold:
+
+- webhookSecret: matches the secret configured on your webhook,
+- gitRWToken (write): lets the bot post reviews,
+- gitReadToken (read-only): lets reviewer pods clone the repository.
+
+H.E.R.M.I.T only ever posts review comments; it never merges or commits.
