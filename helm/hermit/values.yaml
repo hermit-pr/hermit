@@ -2,7 +2,8 @@ replicaCount: 1
 
 image:
   repository: registry.example.com/hermit
-  tag: latest
+  # Defaults to Chart.appVersion when empty.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -26,6 +27,8 @@ config:
   opencodeBin: opencode
   opencodeArgs:
     - run
+  opencodeInitImage: "ghcr.io/anomalyco/opencode:latest"
+  opencodeInitBinPath: "/usr/local/bin/opencode"
   workspace: /workspace
   logLevel: info
   # URL reviewer pods use to report back; defaults to
@@ -52,6 +55,10 @@ secrets:
     key: ""
   # Secret used to validate inbound webhooks (GitHub HMAC / GitLab token).
   webhookSecret:
+    name: ""
+    key: ""
+  # Optional API key the reviewer pods forward to the vLLM endpoint.
+  vllmApiKey:
     name: ""
     key: ""
 

@@ -1,7 +1,10 @@
 """Git operations performed by the reviewer (slave) pod."""
 
+import logging
 import subprocess
 from urllib.parse import quote, urlsplit
+
+logger = logging.getLogger(__name__)
 
 
 def _run(args: list[str]) -> str:
@@ -10,6 +13,7 @@ def _run(args: list[str]) -> str:
     Raises:
         RuntimeError: if the command exits with a non-zero status.
     """
+    logger.debug("running git command: %s", " ".join(args))
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         message = result.stderr.strip()
@@ -28,16 +32,19 @@ def authenticated_url(host_url: str, repo: str, provider: str, token: str) -> st
 
 def clone_repository(url: str, destination: str) -> None:
     """Clone ``url`` into ``destination`` without a working tree checkout."""
+    logger.info("cloning repository into %s", destination)
     _run(["git", "clone", "--no-checkout", url, destination])
 
 
 def fetch_refs(repo_dir: str, refs: list[str]) -> None:
     """Fetch the given refs from the origin of ``repo_dir``."""
+    logger.debug("fetching refs %s in %s", refs, repo_dir)
     _run(["git", "-C", repo_dir, "fetch", "origin", *refs])
 
 
 def diff_between(repo_dir: str, base: str, head: str) -> str:
     """Return the unified diff between ``base`` and ``head``."""
+    logger.debug("diffing %s..%s in %s", base, head, repo_dir)
     return _run(["git", "-C", repo_dir, "diff", "--no-color", f"{base}..{head}"])
 
 

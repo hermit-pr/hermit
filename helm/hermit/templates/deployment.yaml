@@ -4,6 +4,7 @@ metadata:
   name: {{ include "hermit.fullname" . }}
   labels:
     {{- include "hermit.labels" . | nindent 4 }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -13,6 +14,7 @@ spec:
     metadata:
       labels:
         {{- include "hermit.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -23,7 +25,7 @@ spec:
       serviceAccountName: {{ .Values.config.podServiceAccount }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -52,6 +54,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.gitRWToken.name | quote }}
                   key: {{ .Values.secrets.gitRWToken.key | required "secrets.gitRWToken.key is required" | quote }}
+            {{- end }}
+            {{- if .Values.secrets.vllmApiKey.name }}
+            - name: HERMIT_VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.vllmApiKey.name | quote }}
+                  key: {{ .Values.secrets.vllmApiKey.key | required "secrets.vllmApiKey.key is required" | quote }}
             {{- end }}
           livenessProbe:
             httpGet:

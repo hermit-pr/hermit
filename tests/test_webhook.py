@@ -8,6 +8,7 @@ import json
 import httpx
 from conftest import SECRET, make_settings
 
+from hermit import __version__
 from hermit.config import Settings
 from hermit.jobs import JobStore
 from hermit.k8s import FakePodSpawner
@@ -108,12 +109,12 @@ def _github_event() -> ChangeEvent:
 
 
 async def test_healthz_returns_ok() -> None:
-    """The health endpoint reports the bot as alive."""
+    """The health endpoint reports the bot as alive and versioned."""
     app = create_app(_settings(), FakeClient(), FakePodSpawner(), JobStore())
     async with _client(app) as http:
         response = await http.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": __version__}
 
 
 async def test_github_webhook_rejects_bad_signature() -> None:

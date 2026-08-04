@@ -63,9 +63,12 @@ class Settings(_SettingsBase):
     vllm_endpoint: str = Field(..., description="URL of the vLLM inference endpoint")
     model: str = Field(..., description="Model served by the vLLM endpoint")
     review_rules: str = DEFAULT_REVIEW_RULES
+    vllm_api_key: SecretStr | None = None
 
     opencode_bin: str = "opencode"
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
+    opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
+    opencode_init_bin_path: str = "/usr/local/bin/opencode"
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -100,8 +103,11 @@ class SlaveSettings(_SettingsBase):
     vllm_endpoint: str
     model: str
     review_rules: str = DEFAULT_REVIEW_RULES
+    vllm_api_key: SecretStr | None = None
     opencode_bin: str = "opencode"
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
+    opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
+    opencode_init_bin_path: str = "/usr/local/bin/opencode"
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

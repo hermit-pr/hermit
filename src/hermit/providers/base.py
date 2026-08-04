@@ -1,11 +1,14 @@
 """Abstract interface shared by all Git hosting providers."""
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
 import httpx
 
 from hermit.models import ChangeEvent
+
+logger = logging.getLogger(__name__)
 
 
 class GitClient(ABC):

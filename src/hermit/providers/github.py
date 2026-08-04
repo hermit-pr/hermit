@@ -1,9 +1,12 @@
 """GitHub REST API integration."""
 
+import logging
 from typing import Any
 
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubClient(GitClient):
@@ -30,6 +33,7 @@ class GitHubClient(GitClient):
     async def fetch_diff(self, event: ChangeEvent) -> str:
         """Fetch and render the files changed by a pull request."""
         path = f"/repos/{event.repo}/pulls/{event.ref}/files"
+        logger.debug("fetching diff for %s/%s", event.repo, event.ref)
         response = await self._http.get(path)
         response.raise_for_status()
         files = response.json()
@@ -39,12 +43,14 @@ class GitHubClient(GitClient):
         """Submit a general review comment on the pull request."""
         path = f"/repos/{event.repo}/pulls/{event.ref}/reviews"
         payload = {"body": body, "event": "COMMENT", "commit_id": event.head_sha}
+        logger.info("posting review on %s %s/%s", self.endpoint, event.repo, event.ref)
         response = await self._http.post(path, json=payload)
         response.raise_for_status()
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fetch the pull request to fill in the head/base refs."""
         path = f"/repos/{event.repo}/pulls/{event.ref}"
+        logger.debug("resolving refs for %s/%s", event.repo, event.ref)
         response = await self._http.get(path)
         response.raise_for_status()
         pull = response.json()

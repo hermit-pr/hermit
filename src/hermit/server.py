@@ -9,6 +9,7 @@ from typing import Callable, Optional
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from hermit import __version__
 from hermit.config import Settings
 from hermit.jobs import JobStore, ReviewJob
 from hermit.k8s import PodSpawner, pod_environment
@@ -148,10 +149,11 @@ async def _watch_job(
     """Wait for the reviewer pod's report, then clean up."""
     try:
         await asyncio.wait_for(job.reported.wait(), timeout=timeout)
+        logger.info("job %s reported; cleaning up", job.id)
     except asyncio.TimeoutError:
         job.status = "failed"
         job.error = "review report timed out"
-        logger.warning("job %s timed out", job.id)
+        logger.warning("job %s timed out after %.0fs", job.id, timeout)
     finally:
         await spawner.cleanup(job)
         await store.remove(job.id)
@@ -167,7 +169,7 @@ def create_app(
     secret = settings.webhook_secret.get_secret_value()
     tasks: set[asyncio.Task] = set()
 
-    app = FastAPI(title="H.E.R.M.I.T", version="0.1.0")
+    app = FastAPI(title="H.E.R.M.I.T", version=__version__)
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
@@ -181,15 +183,25 @@ def create_app(
         request: Request, provider: str, validate: Callable[[bytes], None]
     ) -> JSONResponse:
         """Validate a webhook and spawn a reviewer pod for the change."""
+        logger.info("received webhook request (provider=%s)", provider)
         body = await request.body()
         try:
             validate(body)
         except WebhookValidationError as exc:
+            logger.warning("rejected %s webhook: %s", provider, exc)
             return JSONResponse({"error": str(exc)}, status_code=401)
         payload = json.loads(body.decode("utf-8"))
         event = parse_github(payload) if provider == "github" else parse_gitlab(payload)
         if event is None:
+            logger.debug("ignoring %s webhook (no review triggered)", provider)
             return JSONResponse({"status": "ignored"}, status_code=202)
+        logger.info(
+            "webhook %s for %s#%s (action=%s)",
+            provider,
+            event.repo,
+            event.ref,
+            event.action,
+        )
         if not event.head_sha:
             try:
                 event = await client.resolve_refs(event)
@@ -204,6 +216,13 @@ def create_app(
                     {"error": "failed to resolve refs"}, status_code=502
                 )
         job = await store.create(event)
+        logger.info(
+            "starting hermit %s for %s %s#%s",
+            job.id,
+            event.provider,
+            event.repo,
+            event.ref,
+        )
         try:
             pod_name, secret_name = await spawner.spawn(
                 job, pod_environment(settings, job)
@@ -219,13 +238,16 @@ def create_app(
             return JSONResponse({"error": "failed to spawn reviewer"}, status_code=503)
         job.pod_name = pod_name
         job.secret_name = secret_name
+        logger.info(
+            "starting pod %s for PR #%s repo %s", pod_name, event.ref, event.repo
+        )
         track(job)
         return JSONResponse({"status": "accepted", "job_id": job.id}, status_code=202)
 
     @app.get("/healthz")
     async def healthz() -> dict:
         """Return a liveness response for probes."""
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.post("/webhook/github")
     async def github_webhook(request: Request) -> JSONResponse:
@@ -254,13 +276,16 @@ def create_app(
         """Receive a review from a reviewer pod and submit it to the PR/MR."""
         job = await store.get(job_id)
         if job is None:
+            logger.warning("report for unknown job %s", job_id)
             return JSONResponse({"error": "unknown job"}, status_code=404)
         provided = request.headers.get("x-hermit-report-secret", "")
         if not hmac.compare_digest(provided, job.report_secret):
+            logger.warning("rejected report for job %s (invalid secret)", job_id)
             return JSONResponse({"error": "invalid report secret"}, status_code=401)
         payload = await request.json()
         body = payload.get("body", "")
         if not body.strip():
+            logger.warning("rejected empty review body for job %s", job_id)
             return JSONResponse({"error": "empty review body"}, status_code=400)
         try:
             await client.post_review(job.event, body)
@@ -278,6 +303,11 @@ def create_app(
         job.body = body
         job.status = "reported"
         job.reported.set()
+        logger.info(
+            "received review from slave PR #%s repo %s",
+            job.event.ref,
+            job.event.repo,
+        )
         return JSONResponse({"status": "ok"}, status_code=200)
 
     return app

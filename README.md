@@ -74,9 +74,12 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_WEBHOOK_SECRET` | yes | secret used to validate inbound webhooks |
 | `HERMIT_VLLM_ENDPOINT` | yes | URL of the dedicated vLLM inference endpoint |
 | `HERMIT_MODEL` | yes | name of the model served by the vLLM endpoint |
+| `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | instructions that shape the review behavior |
 | `HERMIT_OPCODE_BIN` | no | path to the opencode binary (default `opencode`) |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode arguments (default `run`) |
+| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image providing opencode binary (default `ghcr.io/anomalyco/opencode:latest`; empty to disable) |
+| `HERMIT_OPCODE_INIT_BIN_PATH` | no | path to opencode binary inside init image (default `/usr/local/bin/opencode`) |
 | `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |
 | `HERMIT_MASTER_URL` | yes | URL reviewer pods use to reach `/internal/report` |
 | `HERMIT_POD_IMAGE` | yes | container image for reviewer pods |
@@ -89,6 +92,11 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_PORT` | no | HTTP port (default `8080`) |
 | `HERMIT_LOG_LEVEL` | no | Uvicorn log level (default `info`) |
 
+`HERMIT_VERSION` is set automatically from the running code (`hermit.__version__`)
+and exposed through `/healthz` and the `app.kubernetes.io/version` pod label; it
+cannot be overridden by an environment variable, so it always reflects the code
+actually running.
+
 ### Reviewer pod
 
 The master fills these from the originating change event; the pod only reads them from its own environment. Secrets come from a per-job Kubernetes Secret mounted by the master.
@@ -100,10 +108,12 @@ The master fills these from the originating change event; the pod only reads the
 | `HERMIT_GIT_READ_TOKEN` | read-only token (from the job Secret) |
 | `HERMIT_REPO`, `HERMIT_HEAD_SHA/REF`, `HERMIT_BASE_SHA/REF` | what to diff |
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode configuration |
+| `HERMIT_VLLM_API_KEY` | optional API key forwarded to the vLLM endpoint (from the job Secret) |
 | `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
 | `HERMIT_MASTER_URL` | where to report the review |
 | `HERMIT_REPORT_SECRET` | per-job report secret (from the job Secret) |
+| `HERMIT_VERSION` | running H.E.R.M.I.T version |
 
 ## Webhooks
 
@@ -129,11 +139,13 @@ The chart never stores tokens. Create Kubernetes Secrets for them in the same na
 | `secrets.gitReadToken` | read-only token handed to reviewer pods for cloning | `git-read` / `token` |
 | `secrets.gitRWToken` | read/write token the master uses to post reviews | `git-rw` / `token` |
 | `secrets.webhookSecret` | secret validating inbound webhooks | `webhook` / `token` |
+| `secrets.vllmApiKey` | optional API key forwarded to your vLLM endpoint | `vllm` / `token` |
 
 ```sh
 kubectl create secret generic git-read  --from-literal=token=read-only-token
 kubectl create secret generic git-rw    --from-literal=token=write-token
 kubectl create secret generic webhook   --from-literal=token=your-webhook-secret
+kubectl create secret generic vllm      --from-literal=token=your-vllm-api-key  # optional
 ```
 
 ### 3. Install the chart
@@ -151,7 +163,26 @@ helm install hermit helm/hermit \
   --set secrets.gitRWToken.name=git-rw \
   --set secrets.gitRWToken.key=token \
   --set secrets.webhookSecret.name=webhook \
-  --set secrets.webhookSecret.key=token
+  --set secrets.webhookSecret.key=token \
+  --set secrets.vllmApiKey.name=vllm \
+  --set secrets.vllmApiKey.key=token
+```
+
+To use the init container for providing the opencode binary (recommended for airgapped environments), the defaults work out of the box. To use a private registry mirror, override:
+
+```sh
+helm install hermit helm/hermit \
+  ... \
+  --set config.opencodeInitImage=registry.example.com/opencode:latest \
+  --set config.opencodeInitBinPath=/usr/local/bin/opencode
+```
+
+To disable the init container and bundle opencode in the reviewer pod image instead:
+
+```sh
+helm install hermit helm/hermit \
+  ... \
+  --set config.opencodeInitImage=""
 ```
 
 The chart creates the master Deployment and Service, a ServiceAccount with a Role that only allows creating/deleting reviewer pods and their Secrets, plus the ConfigMap. All tokens are injected from your existing Secrets via `secretKeyRef`; nothing sensitive is rendered into the manifests. Set `rbac.enabled` to `false` if you manage RBAC yourself.
@@ -163,7 +194,7 @@ Point GitLab/GitHub webhooks at the master Service (`http://<release-name>-hermi
 ### 5. Verify
 
 - `kubectl get pods` — the master should be `Running`.
-- `curl http://<service>/healthz` returns `{"status": "ok"}`.
+- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.1.0"}`.
 - Open a PR/MR or write `@hermit` in a comment: a reviewer pod is spawned and a review is posted.
 
 ## Running locally

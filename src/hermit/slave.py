@@ -19,6 +19,15 @@ async def run_review(settings: SlaveSettings) -> str:
     workspace = os.path.abspath(settings.workspace)
     os.makedirs(workspace, exist_ok=True)
     repo_dir = os.path.join(workspace, "repo")
+    logger.info(
+        "starting review job %s for %s %s (%s) base=%s ref=%s",
+        settings.job_id,
+        settings.git_provider,
+        settings.repo,
+        settings.model,
+        settings.base_ref,
+        settings.head_ref,
+    )
     source = authenticated_url(
         settings.git_host_url,
         settings.repo,
@@ -35,6 +44,7 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     if not diff.strip():
         raise ValueError("no diff between base and head")
+    logger.info("computed diff of %d bytes", len(diff))
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
@@ -48,8 +58,14 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.vllm_endpoint,
         settings.model,
         workspace,
+        settings.vllm_api_key.get_secret_value() if settings.vllm_api_key else None,
+    )
+    logger.info(
+        "invoking opencode against vLLM endpoint (model=%s)",
+        settings.model,
     )
     output = await runner.run(prompt)
+    logger.info("review produced (%d bytes); reporting to master", len(output))
     report_review(
         settings.master_url,
         settings.job_id,

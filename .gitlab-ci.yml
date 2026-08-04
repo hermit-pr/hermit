@@ -77,8 +77,19 @@ docker-build:
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_JOB_TOKEN" "$CI_REGISTRY"
   script:
-    - docker build -f docker/Dockerfile -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
-    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - |
+      VERSION_TAG=""
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        VERSION_TAG="${CI_COMMIT_TAG#v}"
+        docker build -f docker/Dockerfile \
+          -t "$CI_REGISTRY_IMAGE:$VERSION_TAG" \
+          -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+        docker push "$CI_REGISTRY_IMAGE:$VERSION_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      else
+        docker build -f docker/Dockerfile -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      fi
   rules:
     - if: '$CI_REGISTRY_IMAGE'
 

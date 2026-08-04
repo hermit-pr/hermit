@@ -1,10 +1,13 @@
 """GitLab REST API integration."""
 
+import logging
 from typing import Any
 from urllib.parse import quote
 
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
+
+logger = logging.getLogger(__name__)
 
 
 class GitLabClient(GitClient):
@@ -35,6 +38,7 @@ class GitLabClient(GitClient):
         """Fetch and render the diffs of a merge request."""
         project = self._project(event.repo)
         path = f"/projects/{project}/merge_requests/{event.ref}/diffs"
+        logger.debug("fetching diff for %s/%s", event.repo, event.ref)
         response = await self._http.get(path)
         response.raise_for_status()
         diffs = response.json()
@@ -44,6 +48,7 @@ class GitLabClient(GitClient):
         """Add a note with the review on the merge request."""
         project = self._project(event.repo)
         path = f"/projects/{project}/merge_requests/{event.ref}/notes"
+        logger.info("posting review on %s %s/%s", self.endpoint, event.repo, event.ref)
         response = await self._http.post(path, json={"body": body})
         response.raise_for_status()
 
@@ -51,6 +56,7 @@ class GitLabClient(GitClient):
         """Fetch the merge request to fill in the head/base refs."""
         project = self._project(event.repo)
         path = f"/projects/{project}/merge_requests/{event.ref}"
+        logger.debug("resolving refs for %s/%s", event.repo, event.ref)
         response = await self._http.get(path)
         response.raise_for_status()
         merge_request = response.json()
