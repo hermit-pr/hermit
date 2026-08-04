@@ -405,6 +405,28 @@ def test_parse_github_comment_builds_change_event() -> None:
     assert event.action == "comment"
 
 
+def test_parse_github_comment_with_null_body() -> None:
+    """GitHub @hermit comment on a PR with null body does not crash."""
+    payload = {
+        "action": "created",
+        "issue": {
+            "number": 7,
+            "title": "Add endpoint",
+            "pull_request": {},
+            "body": None,
+            "html_url": "https://github.example/acme/app/pull/7",
+        },
+        "comment": {"body": "please @hermit review this", "user": {"login": "alice"}},
+        "repository": {"full_name": "acme/app"},
+    }
+    event = parse_github(payload)
+    assert event is not None
+    assert event.pr_body == ""
+    assert event.pr_title == "Add endpoint"
+    assert event.ref == "7"
+    assert event.action == "comment"
+
+
 def test_parse_gitlab_returns_none_for_push() -> None:
     """GitLab payloads that are not merge requests are ignored."""
     assert parse_gitlab({"object_kind": "push"}) is None
