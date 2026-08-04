@@ -8,7 +8,7 @@ The bot is implemented in **Python** (FastAPI webhook server). `README.md` is th
 
 ## Layout
 
-- `src/hermit/` — the bot: `server.py` (FastAPI app, webhook endpoints), `config.py` (env-driven settings), `k8s.py` (reviewer pod spawning), `slave.py` (reviewer pod entrypoint), `providers/` (GitHub/GitLab API clients), `signing.py` (webhook auth).
+- `src/hermit/` — the bot: `server.py` (FastAPI app, webhook endpoints), `config.py` (env-driven settings), `k8s.py` (reviewer pod spawning with optional init container for opencode), `slave.py` (reviewer pod entrypoint), `providers/` (GitHub/GitLab API clients), `signing.py` (webhook auth).
 - `tests/` — pytest suite (async tests via pytest-asyncio, mock transports for HTTP).
 - `docker/` — container image: `Dockerfile` + `entrypoint.sh` (shfmt `-i2` + shellcheck clean).
 - `helm/hermit/` — Helm chart to deploy the bot (ConfigMap for non-secret config, Secret for tokens/webhook secret).
@@ -32,7 +32,8 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 ## CI constraints
 
 - GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus lint/test/shellcheck/shfmt/helm jobs. Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
-- `docker-build` job only runs when `$CI_REGISTRY_IMAGE` is set.
+- `docker-build` job only runs when `$CI_REGISTRY_IMAGE` is set. It builds `docker/Dockerfile` and pushes to `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`.
+- `helm-package` job packages the Helm chart and pushes to `oci://$CI_REGISTRY_IMAGE/charts`.
 
 ## Integration notes (context for the harness)
 
