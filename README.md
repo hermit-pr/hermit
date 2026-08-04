@@ -74,7 +74,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_GITHUB_TOKEN` | for GitHub | write token used to post reviews |
 | `HERMIT_GITLAB_TOKEN` | for GitLab | write token used to post reviews |
 | `HERMIT_GIT_READ_TOKEN` | yes | read-only token handed to reviewer pods for cloning |
-| `HERMIT_WEBHOOK_SECRET` | yes | secret used to validate inbound webhooks |
+| `HERMIT_WEBHOOK_SECRET` | yes | secret used to validate inbound webhooks (must be at least 16 characters) |
 | `HERMIT_JOB_ID_SIGNING_KEY` | no | key used to derive deterministic, horizontally-shared job ids (defaults to the webhook secret) |
 | `HERMIT_VLLM_ENDPOINT` | yes | URL of the dedicated vLLM inference endpoint |
 | `HERMIT_MODEL` | yes | name of the model served by the vLLM endpoint |
