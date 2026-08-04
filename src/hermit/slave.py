@@ -6,7 +6,12 @@ import os
 import sys
 
 from hermit.config import SlaveSettings
-from hermit.git import authenticated_url, clone_and_diff
+from hermit.git import (
+    askpass_env,
+    authenticated_url,
+    clone_and_diff,
+    write_askpass,
+)
 from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
 from hermit.report import report_review
@@ -28,19 +33,30 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.base_ref,
         settings.head_ref,
     )
+    askpass_path = os.path.join(workspace, ".git-askpass")
+    write_askpass(askpass_path)
+    env = askpass_env(askpass_path)
     source = authenticated_url(
-        settings.git_host_url,
-        settings.repo,
-        settings.git_provider,
-        settings.git_read_token.get_secret_value(),
+        settings.git_host_url, settings.repo, settings.git_provider
+    )
+    head_source_url = (
+        authenticated_url(
+            settings.git_host_url, settings.source_repo, settings.git_provider
+        )
+        if settings.source_repo
+        else ""
     )
     diff = clone_and_diff(
+        settings.git_provider,
         source,
         repo_dir,
         settings.base_ref,
         settings.head_ref,
-        settings.base_sha,
-        settings.head_sha,
+        base_sha=settings.base_sha,
+        head_sha=settings.head_sha,
+        pr_number=settings.ref if settings.git_provider == "github" else "",
+        head_source_url=head_source_url,
+        env=env,
     )
     if not diff.strip():
         raise ValueError("no diff between base and head")

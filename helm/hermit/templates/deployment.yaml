@@ -62,6 +62,13 @@ spec:
                   name: {{ .Values.secrets.vllmApiKey.name | quote }}
                   key: {{ .Values.secrets.vllmApiKey.key | required "secrets.vllmApiKey.key is required" | quote }}
             {{- end }}
+            {{- if .Values.secrets.reportSigningKey.name }}
+            - name: HERMIT_REPORT_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.reportSigningKey.name | quote }}
+                  key: {{ .Values.secrets.reportSigningKey.key | required "secrets.reportSigningKey.key is required" | quote }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

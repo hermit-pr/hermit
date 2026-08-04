@@ -70,24 +70,32 @@ External systems:
 1. The webhook configured on the Git host posts the event to the master
    (`/webhook/github` or `/webhook/gitlab`).
 2. The master validates the webhook (HMAC signature for GitHub, shared token
-   header for GitLab). It normalizes the payload into a `ChangeEvent`, creates
-   a `ReviewJob` (job id + one-time report secret), creates a Kubernetes
-   `Secret` holding the read-only git token and the report secret, then creates
-   a reviewer Pod in the master's namespace. The pod is non-root, uses
-   `restartPolicy: Never`, and only receives non-secret config plus references
-   to the per-review Secret.
+   header for GitLab). It normalizes the payload into a `ChangeEvent`, derives
+   a **deterministic job id** (HMAC-SHA256 of the event against the shared
+   signing key) plus a random one-time report secret, and creates a Kubernetes
+   `Secret` holding the read-only git token, the report secret, and the event
+   JSON, then creates a reviewer Pod in the master's namespace. The pod is
+   non-root, uses `restartPolicy: Never`, disables service-account token
+   auto-mounting, and only receives non-secret config plus references to the
+   per-review Secret.
 3. The slave pod:
-   a. clones the repository with the read-only token and diffs the base
-      branch/commit against the head branch/commit;
+   a. clones the repository with the read-only token — via `GIT_ASKPASS`, never
+      on the command line — and diffs the base branch/commit against the head
+      branch/commit. Pull requests from GitHub forks and cross-project GitLab
+      merge requests are fetched through `refs/pull/<n>/head` or the
+      `source_repo` remote; in all cases the code being reviewed is the PR/MR
+      head, never the destination branch;
    b. runs `opencode` in the checked-out workspace against the on-premise
       vLLM endpoint, with the diff and the review rules in the prompt.
 4. The slave POSTs the resulting review text to the master's internal endpoint
    `/internal/report/<job_id>`, authenticated with the per-review report
-   secret.
+   secret (the master reconstructs the job from the durable Secret, so any
+   replica can answer).
 5. The master validates the report secret, then submits the review to the
    PR/MR using its scoped **write** token (GitHub pull-request review / GitLab
-   merge-request note). The job finishes and the master deletes the reviewer
-   Pod and its Secret.
+   merge-request note). The job is marked `posted` (idempotent: duplicate
+   reports are ignored) and the master deletes the reviewer Pod and its
+   Secret.
 
 ### Manual trigger from a PR/MR comment
 
@@ -137,10 +145,17 @@ push API is ever called.
   raw body) and GitLab `X-Gitlab-Token` are compared in constant time.
 - **Report authentication.** The `/internal/report/<id>` endpoint requires a
   per-job secret (`X-Hermit-Report-Secret`), compared in constant time. The
-  secret is random per job and never reused.
-- **Pod hardening.** Reviewer pods run as non-root (`runAsNonRoot`), no
-  privileged containers, `restartPolicy: Never`. RBAC is scoped to the
-  master's own namespace: create/get/list/delete pods and secrets.
+  secret is random per job, generated at job-create time and stored in the
+  durable job Secret; it is never reused across jobs.
+- **No token in argv or logs.** Reviewer pods read the read-only git token
+  through a `GIT_ASKPASS` helper injected as an environment variable; the
+  clone command line never contains the token, so it never leaks into logs,
+  pod spec, or command output.
+- **Pod hardening.** Reviewer pods run as non-root (`runAsNonRoot`,
+  `runAsUser/runAsGroup: 1000`), disable service-account token auto-mounting
+  (`automountServiceAccountToken: false`), use `restartPolicy: Never` and a
+  bounded `activeDeadlineSeconds`. RBAC is scoped to the master's own
+  namespace: create/get/list/update/delete pods and secrets.
 - **Airgap.** Everything runs on the operator's infrastructure; no data is sent
   outside the network.
 
@@ -159,23 +174,47 @@ Normalized webhook payload; same shape regardless of provider.
 | `head_sha`, `head_ref` | head commit / source branch |
 | `base_sha`, `base_ref` | base commit / target branch |
 | `title`, `url`, `project_id` | display metadata |
+| `source_repo` | source (fork) project path for cross-project GitLab MRs |
 
 ### `ReviewJob`
 
-In-memory record of one review, created by the master.
+Record of one review. It is materialized in two places: a lightweight
+in-memory handle kept by each master process, and a **durable Kubernetes
+Secret** (`hermit.job=<id>`, annotation `hermit.dev/status`) that any master
+replica can read to reconstruct the job after a restart or to deduplicate
+reports.
 
 | Field | Meaning |
 | --- | --- |
-| `id` | short random job id |
+| `id` | deterministic job id: HMAC-SHA256 of the event against the shared signing key |
 | `event` | the originating `ChangeEvent` |
 | `report_secret` | one-time secret for `/internal/report/<id>` |
-| `status` | `pending` -> `reported` -> `done` (or `failed`) |
+| `status` | `pending` -> `reported` -> `posted` (or `failed`) |
 | `pod_name`, `secret_name` | Kubernetes objects to clean up |
 | `body` | review text reported by the slave |
 
-Jobs are tracked in memory; a job that does not report within
-`HERMIT_REPORT_TIMEOUT_SECONDS` is marked `failed` and cleaned up. This is a
-single-instance deployment by design (see Helm chart, `replicaCount: 1`).
+### Horizontal scaling and idempotence
+
+- **Deterministic job ids.** The job id is derived from the normalized event
+  with HMAC-SHA256 using `HERMIT_REPORT_SIGNING_KEY` (defaults to the webhook
+  secret). Every replica derives the same id for the same event, so a
+  duplicated webhook (or a redelivery after a master restart) cannot spawn a
+  second reviewer.
+- **Dedup at the source of truth.** The durable job Secret is created with
+  `Create` semantics; a conflicting `409` on the same `hermit.job` label means
+  the event is already being handled and is dropped (`202`).
+- **Restart survival.** A master that comes back or scales up simply reads the
+  existing job Secret, restores the in-memory handle, and keeps waiting on the
+  reporter or sweeps stale jobs. Nothing is lost when a master pod restarts.
+- **Stateless report endpoint.** `/internal/report/<id>` is handled by reading
+  the durable Secret, so the replica that receives the callback need not be the
+  one that spawned the pod.
+- **Polling watcher.** Masters do not watch the Kubernetes API for completion;
+  they poll the durable Secret/status every `WATCH_POLL_SECONDS` (5s) and rely
+  on the job being marked `posted` before cleanup.
+- **Sweeper.** A background loop (every `SWEEP_INTERVAL_SECONDS`, 300s) deletes
+  finished or timed-out reviewer pods and orphaned job Secrets, so a crashed
+  master cannot leak pods or secrets.
 
 ## Configuration
 
@@ -192,6 +231,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_GITLAB_TOKEN` | for GitLab | write token (submits reviews) |
 | `HERMIT_GIT_READ_TOKEN` | yes | read-only token handed to reviewer pods |
 | `HERMIT_WEBHOOK_SECRET` | yes | validates inbound webhooks |
+| `HERMIT_REPORT_SIGNING_KEY` | no | derives deterministic, horizontally-shared job ids (default: webhook secret) |
 | `HERMIT_VLLM_ENDPOINT` | yes | passed to reviewer pods |
 | `HERMIT_MODEL` | yes | passed to reviewer pods |
 | `HERMIT_REVIEW_RULES` | no | passed to reviewer pods |
@@ -213,6 +253,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_GIT_PROVIDER`, `HERMIT_GIT_HOST_URL` | where to clone from |
 | `HERMIT_GIT_READ_TOKEN` | read-only token (from the job Secret) |
 | `HERMIT_REPO`, `HERMIT_HEAD_SHA/REF`, `HERMIT_BASE_SHA/REF` | what to diff |
+| `HERMIT_SOURCE_REPO` | source (fork) project path for cross-project GitLab MRs |
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode config |
 | `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
@@ -223,6 +264,11 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 
 - **Webhook invalid / unsupported event** - rejected with `401` or accepted
   and ignored (`202`), no pod is spawned.
+- **Duplicate webhook event** - the deterministic job id collides on the
+  durable Secret (`409`), so only the first copy runs; the others are dropped
+  with `202`.
+- **Master pod restarts / scales** - jobs are reconstructed from the durable
+  Secrets, in-flight reviews continue, and the sweeper reclaims leftovers.
 - **Pod fails to start or crashes** - the job is marked `failed`, the review is
   not published, and leftovers (pod/secret) are cleaned up.
 - **Report timeout** - the job is marked `failed` and cleaned up.
@@ -234,7 +280,9 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 - One container image (`docker/Dockerfile`), two entrypoints
   (`docker/entrypoint.sh` for the master; the pod template runs
   `python -m hermit.slave`).
-- Helm chart `helm/hermit`: master Deployment (replicaCount 1), Service,
-  ConfigMap (non-secret config), Secret (write token, read token, webhook
-  secret), ServiceAccount + Role/RoleBinding for pod/secret management in the
+- Helm chart `helm/hermit`: master Deployment (replicaCount may be raised to
+  scale horizontally — the `secrets` RBAC verbs and the durable job Secrets
+  make this safe), Service, ConfigMap (non-secret config), Secret (write
+  token, read token, webhook secret, optional report signing key),
+  ServiceAccount + Role/RoleBinding for pod/secret management in the
   namespace.

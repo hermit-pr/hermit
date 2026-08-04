@@ -25,3 +25,4 @@ class ChangeEvent(BaseModel):
     title: str = ""
     url: str = ""
     project_id: Optional[int] = None
+    source_repo: str = ""

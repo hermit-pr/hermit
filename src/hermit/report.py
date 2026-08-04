@@ -20,6 +20,10 @@ def report_review(
     headers = {"X-Hermit-Report-Secret": report_secret}
     logger.info("posting review report to %s", url)
     client = http or httpx.Client()
-    response = client.post(url, json={"body": body}, headers=headers, timeout=120.0)
-    logger.debug("report POST returned status %d", response.status_code)
-    response.raise_for_status()
+    try:
+        response = client.post(url, json={"body": body}, headers=headers, timeout=120.0)
+        logger.debug("report POST returned status %d", response.status_code)
+        response.raise_for_status()
+    finally:
+        if http is None:
+            client.close()

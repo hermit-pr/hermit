@@ -2,12 +2,13 @@
 
 from unittest.mock import MagicMock, patch
 
+import kubernetes
 import pytest
 
 from hermit import __version__
 from hermit.config import Settings
 from hermit.jobs import ReviewJob
-from hermit.k8s import K8sPodSpawner, pod_environment
+from hermit.k8s import JobAlreadyExists, K8sPodSpawner, pod_environment
 from hermit.models import ChangeEvent
 
 
@@ -91,6 +92,74 @@ async def test_k8s_spawner_uses_code_version_label() -> None:
         call_args = mock_api.create_namespaced_pod.call_args
         pod = call_args[0][1]  # Second positional arg is the pod body
         assert pod.metadata.labels["app.kubernetes.io/version"] == __version__
+
+
+@pytest.mark.asyncio
+async def test_k8s_pod_is_hardened() -> None:
+    """Reviewer pods are bounded, non-root, and carry no cluster identity."""
+    settings = make_settings()
+    job = make_job()
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, pod = mock_api.create_namespaced_pod.call_args[0]
+        assert pod.spec.automount_service_account_token is False
+        assert pod.spec.active_deadline_seconds == settings.report_timeout_seconds + 60
+
+
+@pytest.mark.asyncio
+async def test_k8s_job_secret_is_durable() -> None:
+    """The job secret carries the event, labels, and a status annotation."""
+    settings = make_settings()
+    job = make_job()
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, secret = mock_api.create_namespaced_secret.call_args[0]
+        assert secret.string_data["report-secret"] == job.report_secret
+        assert secret.metadata.labels["hermit.job"] == job.id
+        assert secret.metadata.annotations["hermit.dev/status"] == "pending"
+        assert '"ref":"refs/heads/feature/test"' in secret.string_data["event"]
+
+
+@pytest.mark.asyncio
+async def test_k8s_spawner_raises_duplicate_on_conflict() -> None:
+    """A 409 on the job secret means a duplicate event is rejected."""
+    settings = make_settings()
+    job = make_job()
+    conflict = kubernetes.client.ApiException(
+        http_resp=MagicMock(status=409, reason="Conflict", data=b"conflict")
+    )
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock(side_effect=conflict)
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        with pytest.raises(JobAlreadyExists):
+            await spawner.spawn(job, pod_environment(settings, job))
+        mock_api.create_namespaced_pod.assert_not_called()
 
 
 @pytest.mark.asyncio

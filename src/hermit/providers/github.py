@@ -1,7 +1,6 @@
 """GitHub REST API integration."""
 
 import logging
-from typing import Any
 
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
@@ -22,22 +21,6 @@ class GitHubClient(GitClient):
             "Authorization": f"Bearer {self._token}",
             "Accept": "application/vnd.github+json",
         }
-
-    @staticmethod
-    def _format_file(file: dict[str, Any]) -> str:
-        """Render a single file entry of the pull request diff."""
-        filename = file.get("filename", "unknown")
-        patch = file.get("patch", "")
-        return f"### {filename}\n{patch}"
-
-    async def fetch_diff(self, event: ChangeEvent) -> str:
-        """Fetch and render the files changed by a pull request."""
-        path = f"/repos/{event.repo}/pulls/{event.ref}/files"
-        logger.debug("fetching diff for %s/%s", event.repo, event.ref)
-        response = await self._http.get(path)
-        response.raise_for_status()
-        files = response.json()
-        return "\n\n".join(self._format_file(file) for file in files)
 
     async def post_review(self, event: ChangeEvent, body: str) -> None:
         """Submit a general review comment on the pull request."""

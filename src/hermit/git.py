@@ -1,45 +1,78 @@
-"""Git operations performed by the reviewer (slave) pod."""
+"""Git operations performed by the reviewer (slave) pod.
+
+Authentication is provided through a ``GIT_ASKPASS`` helper: the clone URL never
+embeds the token and the token never appears in the process argument list or in
+logs.
+"""
 
 import logging
+import os
 import subprocess
-from urllib.parse import quote, urlsplit
+from pathlib import Path
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
 
-def _run(args: list[str]) -> str:
+def _run(args: list[str], env: dict[str, str] | None = None) -> str:
     """Run a git command and return its stdout.
+
+    Args are not logged because a clone URL may be sensitive.
 
     Raises:
         RuntimeError: if the command exits with a non-zero status.
     """
-    logger.debug("running git command: %s", " ".join(args))
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    logger.debug("running git command: %s", args[0])
+    result = subprocess.run(args, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
         message = result.stderr.strip()
         raise RuntimeError(f"{args[0]} failed: {message}")
     return result.stdout
 
 
-def authenticated_url(host_url: str, repo: str, provider: str, token: str) -> str:
-    """Build a clone URL embedding ``token`` for the given provider."""
+def authenticated_url(host_url: str, repo: str, provider: str) -> str:
+    """Build a clone URL for the given provider, without credentials.
+
+    Only the username is embedded (``oauth2`` for GitLab, ``x-access-token`` for
+    GitHub); the password (the read token) is supplied by ``GIT_ASKPASS``.
+    """
     parsed = urlsplit(host_url)
     scheme = parsed.scheme or "https"
     host = parsed.netloc
     username = "oauth2" if provider == "gitlab" else "x-access-token"
-    return f"{scheme}://{username}:{quote(token, safe='')}@{host}/{repo}.git"
+    return f"{scheme}://{username}@{host}/{repo}.git"
 
 
-def clone_repository(url: str, destination: str) -> None:
+def write_askpass(path: str) -> None:
+    """Write a ``GIT_ASKPASS`` helper answering with ``HERMIT_GIT_READ_TOKEN``."""
+    Path(path).write_text(
+        '#!/bin/sh\necho "$HERMIT_GIT_READ_TOKEN"\n', encoding="utf-8"
+    )
+    os.chmod(path, 0o700)
+
+
+def askpass_env(askpass_path: str) -> dict[str, str]:
+    """Return the environment that routes git authentication to the helper."""
+    env = os.environ.copy()
+    env["GIT_ASKPASS"] = askpass_path
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def clone_repository(
+    url: str, destination: str, env: dict[str, str] | None = None
+) -> None:
     """Clone ``url`` into ``destination`` without a working tree checkout."""
     logger.info("cloning repository into %s", destination)
-    _run(["git", "clone", "--no-checkout", url, destination])
+    _run(["git", "clone", "--no-checkout", url, destination], env=env)
 
 
-def fetch_refs(repo_dir: str, refs: list[str]) -> None:
+def fetch_refs(
+    repo_dir: str, refs: list[str], env: dict[str, str] | None = None
+) -> None:
     """Fetch the given refs from the origin of ``repo_dir``."""
     logger.debug("fetching refs %s in %s", refs, repo_dir)
-    _run(["git", "-C", repo_dir, "fetch", "origin", *refs])
+    _run(["git", "-C", repo_dir, "fetch", "origin", *refs], env=env)
 
 
 def diff_between(repo_dir: str, base: str, head: str) -> str:
@@ -49,16 +82,41 @@ def diff_between(repo_dir: str, base: str, head: str) -> str:
 
 
 def clone_and_diff(
+    provider: str,
     source_url: str,
     repo_dir: str,
     base_ref: str,
     head_ref: str,
+    *,
     base_sha: str = "",
     head_sha: str = "",
+    pr_number: str = "",
+    head_source_url: str = "",
+    env: dict[str, str] | None = None,
 ) -> str:
-    """Clone a repository and diff the base against the head."""
-    clone_repository(source_url, repo_dir)
-    fetch_refs(repo_dir, [base_ref, head_ref])
+    """Clone a repository and diff the base against the head.
+
+    ``pr_number`` (GitHub) makes the head fetch use ``refs/pull/<n>/head`` so
+    that pull requests from forks are supported. ``head_source_url`` (GitLab)
+    makes the head fetch come from the fork project for cross-project merge
+    requests. The head/base SHAs take precedence over branch names when both
+    objects are available locally.
+    """
+    clone_repository(source_url, repo_dir, env)
+    if provider == "github" and pr_number:
+        fetch_refs(repo_dir, [base_ref], env)
+        _run(
+            ["git", "-C", repo_dir, "fetch", "origin", f"refs/pull/{pr_number}/head"],
+            env=env,
+        )
+        head = head_sha or "FETCH_HEAD"
+    elif head_source_url and head_source_url != source_url:
+        fetch_refs(repo_dir, [base_ref], env)
+        _run(["git", "-C", repo_dir, "remote", "add", "head-source", head_source_url])
+        _run(["git", "-C", repo_dir, "fetch", "head-source", head_ref], env=env)
+        head = head_sha or "FETCH_HEAD"
+    else:
+        fetch_refs(repo_dir, [base_ref, head_ref], env)
+        head = head_sha or f"origin/{head_ref}"
     base = base_sha or f"origin/{base_ref}"
-    head = head_sha or f"origin/{head_ref}"
     return diff_between(repo_dir, base, head)

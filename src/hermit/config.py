@@ -60,6 +60,7 @@ class Settings(_SettingsBase):
     git_read_token: SecretStr
 
     webhook_secret: SecretStr = Field(..., min_length=16)
+    report_signing_key: SecretStr | None = None
     vllm_endpoint: str = Field(..., description="URL of the vLLM inference endpoint")
     model: str = Field(..., description="Model served by the vLLM endpoint")
     review_rules: str = DEFAULT_REVIEW_RULES
@@ -96,6 +97,7 @@ class SlaveSettings(_SettingsBase):
     git_host_url: str = "https://github.com"
     git_read_token: SecretStr
     repo: str
+    source_repo: str = ""
     head_sha: str = ""
     head_ref: str = ""
     base_sha: str = ""

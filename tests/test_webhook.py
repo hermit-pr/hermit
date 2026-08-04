@@ -285,6 +285,77 @@ async def test_report_returns_404_for_unknown_job() -> None:
     assert response.status_code == 404
 
 
+async def test_duplicate_report_is_ignored() -> None:
+    """A repeated report does not post the review twice."""
+    client = FakeClient()
+    spawner = FakePodSpawner()
+    store = JobStore()
+    app = create_app(_settings(), client, spawner, store)
+    job = await store.create(_github_event())
+    await spawner.spawn(job, {})
+    async with _client(app) as http:
+        first = await http.post(
+            f"/internal/report/{job.id}",
+            json={"body": "rev"},
+            headers={"X-Hermit-Report-Secret": job.report_secret},
+        )
+        second = await http.post(
+            f"/internal/report/{job.id}",
+            json={"body": "rev again"},
+            headers={"X-Hermit-Report-Secret": job.report_secret},
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert client.posted == ["rev"]
+
+
+async def test_report_survives_master_restart() -> None:
+    """A report can be served by k8s state after the in-memory store is lost."""
+    client = FakeClient()
+    spawner = FakePodSpawner()
+    store = JobStore()
+    app = create_app(_settings(), client, spawner, store)
+    job = await store.create(_github_event())
+    await spawner.spawn(job, {})
+    await store.remove(job.id)
+    async with _client(app) as http:
+        response = await http.post(
+            f"/internal/report/{job.id}",
+            json={"body": "rev"},
+            headers={"X-Hermit-Report-Secret": job.report_secret},
+        )
+    assert response.status_code == 200
+    assert client.posted == ["rev"]
+
+
+async def test_job_ids_are_deterministic_per_event() -> None:
+    """The same event maps to the same job id across stores; secrets differ."""
+    event = _github_event()
+    first = await JobStore(signing_key="key").create(event)
+    second = await JobStore(signing_key="key").create(event)
+    assert first.id == second.id
+    assert first.report_secret != second.report_secret
+    other = event.model_copy(update={"head_sha": "different"})
+    third = await JobStore(signing_key="key").create(other)
+    assert third.id != first.id
+
+
+def test_parse_gitlab_captures_fork_source_repo() -> None:
+    """A cross-project (fork) MR records the source project path."""
+    payload = _gitlab_payload()
+    payload["object_attributes"]["source"] = {"path_with_namespace": "fork/app"}
+    event = parse_gitlab(payload)
+    assert event is not None
+    assert event.source_repo == "fork/app"
+
+
+def test_parse_gitlab_same_project_has_no_source_repo() -> None:
+    """A same-project MR leaves source_repo empty."""
+    event = parse_gitlab(_gitlab_payload())
+    assert event is not None
+    assert event.source_repo == ""
+
+
 def test_parse_github_builds_pr_change_event() -> None:
     """GitHub pull request payloads are normalized into a change event."""
     event = parse_github(_github_pr_payload())

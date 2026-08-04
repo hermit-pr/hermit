@@ -20,16 +20,16 @@ from hermit.prompt import build_review_prompt
 from hermit.report import report_review
 
 
-def test_authenticated_url_embeds_github_token() -> None:
-    """GitHub clone URLs embed the token as x-access-token."""
-    url = authenticated_url("https://git.example.com", "acme/app", "github", "tok123")
-    assert url == "https://x-access-token:tok123@git.example.com/acme/app.git"
+def test_authenticated_url_uses_github_username() -> None:
+    """GitHub clone URLs use the x-access-token username and no token."""
+    url = authenticated_url("https://git.example.com", "acme/app", "github")
+    assert url == "https://x-access-token@git.example.com/acme/app.git"
 
 
-def test_authenticated_url_embeds_gitlab_token() -> None:
-    """GitLab clone URLs embed the token as oauth2."""
-    url = authenticated_url("https://git.example.com", "acme/app", "gitlab", "tok123")
-    assert url == "https://oauth2:tok123@git.example.com/acme/app.git"
+def test_authenticated_url_uses_gitlab_username() -> None:
+    """GitLab clone URLs use the oauth2 username and no token."""
+    url = authenticated_url("https://git.example.com", "acme/app", "gitlab")
+    assert url == "https://oauth2@git.example.com/acme/app.git"
 
 
 def test_build_review_prompt_includes_rules_and_diff() -> None:
@@ -92,11 +92,87 @@ def test_git_clone_and_diff_returns_expected_output() -> None:
         diff = diff_between(str(repo_dir), "origin/main", "origin/feature")
         assert "+line2" in diff
 
-        clone_and_diff(str(origin), str(workspace / "repo2"), "main", "feature")
+        clone_and_diff(
+            "github",
+            str(origin),
+            str(workspace / "repo2"),
+            "main",
+            "feature",
+        )
         assert (workspace / "repo2").exists()
 
 
-def _run_git(args: list[str], cwd: Path | None = None) -> None:
-    """Run a git command in a temporary test repository."""
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
+def test_clone_and_diff_github_fork_uses_pull_ref() -> None:
+    """GitHub fork PRs are fetched via refs/pull/<number>/head."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "file.txt").write_text("base\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        _run_git(["git", "checkout", "-b", "feature"], origin)
+        (origin / "file.txt").write_text("base\nhead\n", encoding="utf-8")
+        _run_git(["git", "commit", "-am", "head"], origin)
+        head_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+        _run_git(["git", "checkout", "main"], origin)
+        _run_git(["git", "update-ref", "refs/pull/1/head", head_sha], origin)
+
+        workspace = Path(tmp) / "workspace"
+        workspace.mkdir()
+        repo_dir = workspace / "repo"
+        diff = clone_and_diff(
+            "github",
+            str(origin),
+            str(repo_dir),
+            "main",
+            "feature",
+            pr_number="1",
+        )
+        assert "+head" in diff
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
+def test_clone_and_diff_gitlab_cross_project_fork() -> None:
+    """GitLab cross-project fork MRs fetch the head branch from the fork."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        fork = Path(tmp) / "fork"
+        for path in (origin, fork):
+            _run_git(["git", "init", "-b", "main", str(path)])
+            _run_git(["git", "config", "user.email", "test@example.com"], path)
+            _run_git(["git", "config", "user.name", "test"], path)
+        (origin / "file.txt").write_text("base\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        _run_git(["git", "remote", "add", "upstream", str(origin)], fork)
+        _run_git(["git", "fetch", "upstream"], fork)
+        _run_git(["git", "checkout", "-b", "feature", "upstream/main"], fork)
+        (fork / "file.txt").write_text("base\nhead\n", encoding="utf-8")
+        _run_git(["git", "commit", "-am", "head"], fork)
+
+        workspace = Path(tmp) / "workspace"
+        workspace.mkdir()
+        repo_dir = workspace / "repo"
+        diff = clone_and_diff(
+            "gitlab",
+            str(origin),
+            str(repo_dir),
+            "main",
+            "feature",
+            head_source_url=str(fork),
+        )
+        assert "+head" in diff
+
+
+def _run_git(args: list[str], cwd: Path | None = None) -> str:
+    """Run a git command in a temporary test repository and return stdout."""
     result = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
+    return result.stdout

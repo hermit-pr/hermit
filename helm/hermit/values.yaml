@@ -57,6 +57,11 @@ secrets:
   webhookSecret:
     name: ""
     key: ""
+  # Optional key used to derive deterministic, horizontally-shared job ids.
+  # When unset, the webhook secret is used instead.
+  reportSigningKey:
+    name: ""
+    key: ""
   # Optional API key the reviewer pods forward to the vLLM endpoint.
   vllmApiKey:
     name: ""
