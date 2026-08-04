@@ -85,6 +85,7 @@ class OpenCodeRunner:
         *,
         api_key: Optional[str] = None,
         extra_env: Optional[dict[str, str]] = None,
+        timeout: int = 900,
     ) -> None:
         self._bin = bin_path
         self._args = args
@@ -93,6 +94,7 @@ class OpenCodeRunner:
         self._workspace = workspace
         self._api_key = api_key
         self._extra_env = extra_env or {}
+        self._timeout = timeout
 
     def _write_config(self) -> None:
         """Write an opencode.json wiring the vLLM endpoint into the workspace.
@@ -168,7 +170,9 @@ class OpenCodeRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=self._timeout
+        )
         logger.debug("opencode exited with %d", process.returncode)
         if process.returncode != 0:
             message = stderr.decode().strip()

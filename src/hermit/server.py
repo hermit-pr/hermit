@@ -161,6 +161,7 @@ async def _watch_job(
     spawner: PodSpawner,
     store: JobStore,
     timeout: float,
+    client: GitClient,
 ) -> None:
     """Wait for the reviewer pod's report, then clean up.
 
@@ -177,6 +178,20 @@ async def _watch_job(
                 job.status = "failed"
                 job.error = "review report timed out"
                 logger.warning("job %s timed out after %.0fs", job.id, timeout)
+                if job.event.head_sha:
+                    try:
+                        await client.set_commit_status(
+                            job.event,
+                            "error",
+                            description="Review timed out.",
+                            context="hermit/review",
+                        )
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        logger.warning(
+                            "failed to set error status for %s#%s",
+                            job.event.repo,
+                            job.event.ref,
+                        )
                 break
             durable = await spawner.get_job(job.id)
             if durable is None or durable.status in ("posted", "failed"):
@@ -285,6 +300,7 @@ async def _authorize_github_commenter(
         raise PermissionError("commenter is not a repository member")
 
 
+# pylint: disable=too-many-positional-arguments
 async def _launch(
     provider: str,
     event: ChangeEvent,
@@ -292,8 +308,12 @@ async def _launch(
     spawner: PodSpawner,
     store: JobStore,
     track: Callable[[ReviewJob], None],
+    client: GitClient,
 ) -> JSONResponse:
     """Create a job for ``event`` and spawn its reviewer pod."""
+    if len(store.all()) >= settings.max_concurrent_jobs:
+        logger.warning("max concurrent jobs reached (%d)", settings.max_concurrent_jobs)
+        return JSONResponse({"error": "too many concurrent jobs"}, status_code=503)
     job = await store.create(event)
     logger.info(
         "starting hermit %s for %s %s#%s",
@@ -327,6 +347,18 @@ async def _launch(
     job.secret_name = secret_name
     logger.info("starting pod %s for PR #%s repo %s", pod_name, event.ref, event.repo)
     track(job)
+    if event.head_sha:
+        try:
+            await client.set_commit_status(
+                event,
+                "pending",
+                description="H.E.R.M.I.T is reviewing...",
+                context="hermit/review",
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "failed to set pending status for %s#%s", event.repo, event.ref
+            )
     return JSONResponse({"status": "accepted", "job_id": job.id}, status_code=202)
 
 
@@ -349,7 +381,7 @@ def create_app(
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
         task = asyncio.create_task(
-            _watch_job(job, spawner, store, settings.report_timeout_seconds)
+            _watch_job(job, spawner, store, settings.report_timeout_seconds, client)
         )
         tasks.add(task)
         task.add_done_callback(tasks.discard)
@@ -392,7 +424,7 @@ def create_app(
         if error is not None:
             return error
         assert event is not None
-        return await _launch(provider, event, settings, spawner, store, track)
+        return await _launch(provider, event, settings, spawner, store, track, client)
 
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -469,6 +501,19 @@ def create_app(
                 job.event.repo,
                 job.event.ref,
             )
+            try:
+                await client.set_commit_status(
+                    job.event,
+                    "failure",
+                    description="Review submission failed.",
+                    context="hermit/review",
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.warning(
+                    "failed to set failure status for %s#%s",
+                    job.event.repo,
+                    job.event.ref,
+                )
             job.status = "failed"
             job.error = "review submission failed"
             job.reported.set()
@@ -477,6 +522,19 @@ def create_app(
         job.body = body
         job.status = "posted"
         job.reported.set()
+        try:
+            await client.set_commit_status(
+                job.event,
+                "success",
+                description="Review completed.",
+                context="hermit/review",
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "failed to set success status for %s#%s",
+                job.event.repo,
+                job.event.ref,
+            )
         if await spawner.mark_posted(job_id):
             await spawner.cleanup(job)
         else:

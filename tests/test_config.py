@@ -68,3 +68,25 @@ def test_settings_default_review_rules_define_sections() -> None:
 def test_settings_review_rules_defaults_to_empty() -> None:
     """Without explicit rules the bot uses its hardcoded default in the prompt."""
     assert make_settings().review_rules == ""
+
+
+def test_github_provider_requires_github_token() -> None:
+    """Settings for the GitHub provider without a token are rejected."""
+    with pytest.raises(ValidationError):
+        make_settings(git_provider="github", github_token=None)
+
+
+def test_gitlab_provider_requires_gitlab_token() -> None:
+    """Settings for the GitLab provider without a token are rejected."""
+    with pytest.raises(ValidationError):
+        make_settings(git_provider="gitlab", gitlab_token=None)
+
+
+def test_max_concurrent_jobs_default() -> None:
+    """The default concurrency cap is 20 jobs."""
+    assert make_settings().max_concurrent_jobs == 20
+
+
+def test_opencode_timeout_default() -> None:
+    """The default opencode subprocess timeout is 900 seconds."""
+    assert make_settings().opencode_timeout_seconds == 900

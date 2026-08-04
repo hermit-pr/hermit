@@ -242,3 +242,103 @@ async def test_github_check_membership_rejects_non_member() -> None:
     finally:
         await client.aclose()
     assert member is False
+
+
+@pytest.mark.asyncio
+async def test_github_set_commit_status() -> None:
+    """GitHub commit statuses are posted to the statuses endpoint."""
+    event = ChangeEvent(
+        provider="github",
+        action="opened",
+        repo="o/r",
+        ref="1",
+        head_sha="abc123",
+        url="https://example.com/pr/1",
+    )
+    posted: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/repos/o/r/statuses/abc123"
+        posted.update(json.loads(request.content))
+        return httpx.Response(201, json={})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        await client.set_commit_status(
+            event, "pending", "H.E.R.M.I.T is reviewing...", "hermit/review"
+        )
+    finally:
+        await client.aclose()
+    assert posted == {
+        "state": "pending",
+        "description": "H.E.R.M.I.T is reviewing...",
+        "context": "hermit/review",
+        "target_url": "https://example.com/pr/1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_gitlab_set_commit_status() -> None:
+    """GitLab commit statuses are posted to the statuses endpoint."""
+    event = ChangeEvent(
+        provider="gitlab",
+        action="open",
+        repo="o/r",
+        ref="1",
+        head_sha="abc123",
+        project_id=42,
+        head_ref="feature",
+    )
+    posted: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/projects/42/statuses/abc123"
+        posted.update(json.loads(request.content))
+        return httpx.Response(201, json={})
+
+    client = GitLabClient("https://git.example", "token123", http=_http(handler))
+    try:
+        await client.set_commit_status(
+            event, "success", "Review completed.", "hermit/review"
+        )
+    finally:
+        await client.aclose()
+    assert posted == {
+        "state": "success",
+        "description": "Review completed.",
+        "name": "hermit/review",
+        "ref": "feature",
+    }
+
+
+@pytest.mark.asyncio
+async def test_gitlab_check_membership_true() -> None:
+    """A 200 on the group membership endpoint means the user is a member."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/groups/acme/members/alice"
+        return httpx.Response(200, json={"id": 1, "username": "alice"})
+
+    client = GitLabClient("https://git.example", "token123", http=_http(handler))
+    try:
+        member = await client.check_membership("acme", "alice")
+    finally:
+        await client.aclose()
+    assert member is True
+
+
+@pytest.mark.asyncio
+async def test_gitlab_check_membership_not_found() -> None:
+    """A 404 on the group membership endpoint means the user is not a member."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "not found"})
+
+    client = GitLabClient("https://git.example", "token123", http=_http(handler))
+    try:
+        member = await client.check_membership("acme", "mallory")
+    finally:
+        await client.aclose()
+    assert member is False

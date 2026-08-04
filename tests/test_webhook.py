@@ -23,6 +23,7 @@ class FakeClient(GitClient):
     def __init__(self) -> None:
         super().__init__(endpoint="https://ignored", token="fake")
         self.posted: list[str] = []
+        self.statuses: list[str] = []
         self.resolved: dict[str, str] = {}
 
     def headers(self) -> dict[str, str]:
@@ -32,6 +33,12 @@ class FakeClient(GitClient):
     async def post_review(self, _event: ChangeEvent, body: str) -> None:
         """Record a posted review body."""
         self.posted.append(body)
+
+    async def set_commit_status(
+        self, _event: ChangeEvent, state: str, _description: str, _context: str
+    ) -> None:
+        """Record a commit status update."""
+        self.statuses.append(state)
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fill refs from the recorded override map."""
@@ -535,3 +542,32 @@ async def test_github_comment_from_non_member_is_rejected() -> None:
         )
     assert response.status_code == 403
     assert not store.all()
+
+
+async def test_max_concurrent_jobs_rejects_excess() -> None:
+    """A webhook beyond the concurrency limit is rejected with 503."""
+    store = JobStore()
+    spawner = FakePodSpawner()
+    app = create_app(
+        _settings(max_concurrent_jobs=2, report_timeout_seconds=10),
+        FakeClient(),
+        spawner,
+        store,
+    )
+    payloads = []
+    for sha in ("abc111", "abc222", "abc333"):
+        payload = _github_pr_payload()
+        payload["pull_request"]["head"]["sha"] = sha
+        payloads.append(payload)
+    async with _client(app) as http:
+        statuses = []
+        for payload in payloads:
+            signed = _github_signature(json.dumps(payload).encode())
+            response = await http.post(
+                "/webhook/github",
+                content=json.dumps(payload).encode(),
+                headers={"X-Hub-Signature-256": signed},
+            )
+            statuses.append(response.status_code)
+    assert statuses == [202, 202, 503]
+    assert len(store.all()) == 2

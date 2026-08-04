@@ -12,6 +12,7 @@ def make_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {
         "webhook_secret": SECRET,
         "git_read_token": "read-token",
+        "github_token": "github-token",
         "vllm_endpoint": "http://vllm.example:8000/v1",
         "model": "test-model",
         "master_url": "http://hermit:8080",

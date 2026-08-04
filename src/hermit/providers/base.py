@@ -46,6 +46,12 @@ class GitClient(ABC):
         """Publish a review with ``body`` on the given change."""
 
     @abstractmethod
+    async def set_commit_status(
+        self, event: ChangeEvent, state: str, description: str, context: str
+    ) -> None:
+        """Set a commit status (pending/success/failure/error) on the head commit."""
+
+    @abstractmethod
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Return the event with head/base refs filled from the provider API."""
 

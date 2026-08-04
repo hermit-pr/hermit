@@ -30,6 +30,24 @@ class GitHubClient(GitClient):
         response = await self._request("POST", path, json=payload)
         response.raise_for_status()
 
+    async def set_commit_status(
+        self, event: ChangeEvent, state: str, description: str, context: str
+    ) -> None:
+        """Set a commit status (pending/success/failure/error) on the head commit."""
+        path = f"/repos/{event.repo}/statuses/{event.head_sha}"
+        payload = {
+            "state": state,
+            "description": description[:140],
+            "context": context,
+        }
+        if event.url:
+            payload["target_url"] = event.url
+        logger.debug(
+            "setting commit status %s on %s/%s", state, event.repo, event.head_sha[:8]
+        )
+        response = await self._request("POST", path, json=payload)
+        response.raise_for_status()
+
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fetch the pull request to fill in the head/base refs."""
         path = f"/repos/{event.repo}/pulls/{event.ref}"

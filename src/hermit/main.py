@@ -25,6 +25,9 @@ def run() -> None:
     """Start the master webhook server using the configured settings."""
     settings: Settings = get_settings()
     logger.info(
+        "Starting H.E.R.M.I.T v%s on %s:%s", __version__, settings.host, settings.port
+    )
+    logger.info(
         "starting H.E.R.M.I.T master v%s (%s provider) on %s:%d",
         __version__,
         settings.git_provider,

@@ -33,6 +33,26 @@ class GitLabClient(GitClient):
         response = await self._request("POST", path, json={"body": body})
         response.raise_for_status()
 
+    async def set_commit_status(
+        self, event: ChangeEvent, state: str, description: str, context: str
+    ) -> None:
+        """Set a commit status (pending/success/failure/error) on the head commit."""
+        project_id = event.project_id or event.repo.replace("/", "%2F")
+        path = f"/projects/{project_id}/statuses/{event.head_sha}"
+        payload = {
+            "state": state,
+            "description": description[:255],
+            "name": context,
+            "ref": event.head_ref,
+        }
+        if event.url:
+            payload["target_url"] = event.url
+        logger.debug(
+            "setting commit status %s on %s/%s", state, project_id, event.head_sha[:8]
+        )
+        response = await self._request("POST", path, json=payload)
+        response.raise_for_status()
+
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fetch the merge request to fill in the head/base refs."""
         project = self._project(event.repo)
@@ -57,3 +77,12 @@ class GitLabClient(GitClient):
             project_id=merge_request.get("iid"),
             source_repo=event.source_repo,
         )
+
+    async def check_membership(self, org: str, username: str) -> bool:
+        """Return True when ``username`` is a member of ``org``."""
+        path = f"/groups/{org}/members/{username}"
+        response = await self._request("GET", path)
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return True

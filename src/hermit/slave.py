@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 
+from hermit import __version__
 from hermit.config import SlaveSettings
 from hermit.git import (
     askpass_env,
@@ -95,6 +96,7 @@ async def run_review(settings: SlaveSettings) -> str:
             settings.vllm_api_key.get_secret_value() if settings.vllm_api_key else None
         ),
         extra_env={"PROJECT_POLICY_FILE": policy_path},
+        timeout=settings.opencode_timeout_seconds,
     )
     logger.info(
         "invoking opencode against vLLM endpoint (model=%s)",
@@ -102,13 +104,18 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
+    header = (
+        f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
+    )
+    body = header + output
+
     await report_review(
         settings.master_url,
         settings.job_id,
         settings.report_secret.get_secret_value(),
-        output,
+        body,
     )
-    return output
+    return body
 
 
 def _handle_signal(signum: int, _frame: object) -> None:

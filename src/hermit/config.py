@@ -8,7 +8,7 @@ import shlex
 from functools import lru_cache
 from typing import List, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GitProvider = Literal["github", "gitlab"]
@@ -81,6 +81,7 @@ class Settings(_SettingsBase):
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
+    opencode_timeout_seconds: int = 900
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -88,6 +89,7 @@ class Settings(_SettingsBase):
     pod_namespace: str = ""
     pod_service_account: str = ""
     report_timeout_seconds: int = 1800
+    max_concurrent_jobs: int = 20
     pod_spawner: Literal["k8s", "fake"] = "k8s"
     kube_config: str | None = None
 
@@ -103,6 +105,19 @@ class Settings(_SettingsBase):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
+
+    @model_validator(mode="after")
+    def _validate_tokens(self) -> "Settings":
+        """Fail fast when the token for the configured provider is missing."""
+        if self.git_provider == "github" and not self.github_token:
+            raise ValueError(
+                "HERMIT_GITHUB_TOKEN is required when git_provider is 'github'"
+            )
+        if self.git_provider == "gitlab" and not self.gitlab_token:
+            raise ValueError(
+                "HERMIT_GITLAB_TOKEN is required when git_provider is 'gitlab'"
+            )
+        return self
 
 
 class SlaveSettings(_SettingsBase):
@@ -134,6 +149,7 @@ class SlaveSettings(_SettingsBase):
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
+    opencode_timeout_seconds: int = 900
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

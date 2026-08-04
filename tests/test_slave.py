@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from hermit.config import DEFAULT_REVIEW_RULES
+from hermit.config import DEFAULT_REVIEW_RULES, SlaveSettings
 from hermit.git import (
     authenticated_url,
     clone_and_diff,
@@ -20,6 +20,7 @@ from hermit.git import (
 )
 from hermit.prompt import build_review_prompt
 from hermit.report import report_review
+from hermit.slave import run_review
 
 
 def test_authenticated_url_uses_github_username() -> None:
@@ -129,6 +130,52 @@ async def test_report_review_posts_to_master() -> None:
     assert received["url"] == "http://hermit:8080/internal/report/job123"
     assert received["secret"] == "s3cr3t"
     assert received["body"] == "review body"
+
+
+class _FakeRunner:
+    """Stands in for OpenCodeRunner, returning a canned review body."""
+
+    def __init__(self, output: str) -> None:
+        self._output = output
+
+    async def run(self, _prompt: str) -> str:
+        """Return the canned output without running a subprocess."""
+        return self._output
+
+
+@pytest.mark.asyncio
+async def test_review_includes_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The review returned and reported by run_review carries the header."""
+    reported: dict = {}
+
+    async def fake_report(*args) -> None:
+        """Capture the body passed to the real report function."""
+        reported["body"] = args[3]
+
+    monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
+    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("the review body")
+    )
+    monkeypatch.setattr("hermit.slave.report_review", fake_report)
+    settings = SlaveSettings(
+        job_id="job1",
+        git_read_token="read-token",
+        repo="acme/app",
+        ref="42",
+        vllm_endpoint="http://vllm.example:8000/v1",
+        model="test-model",
+        master_url="http://hermit:8080",
+        report_secret="s3cr3t",
+        workspace=str(tmp_path),
+    )
+    body = await run_review(settings)
+    assert body.startswith("## 🤖 H.E.R.M.I.T Code Review v")
+    assert "test-model" in body
+    assert "the review body" in body
+    assert reported["body"] == body
 
 
 @pytest.mark.skipif(
