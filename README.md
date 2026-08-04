@@ -8,6 +8,9 @@ H.E.R.M.I.T is a configurable code-review bot designed to work with **on-premise
 
 It is built to run fully **airgapped**: no external SaaS, no cloud services, no model inference outside your network.
 
+**Primary repository:** [gitlab.com/hermit-bot/hermit](https://gitlab.com/hermit-bot/hermit)  
+**Mirror:** [github.com/hermit-pr/hermit](https://github.com/hermit-pr/hermit)
+
 ## Features
 
 - **Webhook-driven** — listens on GitLab/GitHub webhooks and automatically publishes a review on every PR/MR the webhook is configured for.
