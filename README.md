@@ -1,5 +1,7 @@
 # H.E.R.M.I.T
 
+![H.E.R.M.I.T logo](hermit.png)
+
 **Hermit Emits Reviews for Merge-requests In Total-isolation**
 
 H.E.R.M.I.T is a configurable code-review bot designed to work with **on-premise GitLab and GitHub instances**. It reviews pull requests (PR) and merge requests (MR) by running the **opencode** agent against a dedicated, self-hosted **vLLM** model endpoint.
