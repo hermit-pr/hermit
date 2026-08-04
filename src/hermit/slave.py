@@ -77,9 +77,11 @@ async def run_review(settings: SlaveSettings) -> str:
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
-        settings.head_ref,
+        settings.ref,
         settings.review_rules,
         diff,
+        pr_title=settings.pr_title,
+        pr_body=settings.pr_body,
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
     )

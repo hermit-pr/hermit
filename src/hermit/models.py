@@ -22,7 +22,8 @@ class ChangeEvent(BaseModel):
     head_ref: str = ""
     base_sha: str = ""
     base_ref: str = ""
-    title: str = ""
+    pr_title: str = ""
+    pr_body: str = ""
     url: str = ""
     project_id: Optional[int] = None
     source_repo: str = ""

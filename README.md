@@ -135,19 +135,22 @@ The master fills these from the originating change event; the pod only reads the
 
 ## Deploying on Kubernetes
 
-### 1. Build the image
+### 1. Pull the CI-built image
+
+The `docker-build` pipeline job builds the image and pushes it to your GitLab Container Registry once `$CI_REGISTRY_IMAGE` is set, so there is no need to build it locally:
+
+- every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
+- tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
+
+For example:
 
 ```sh
-docker build -f docker/Dockerfile -t hermit .
+docker pull registry.gitlab.com/hermit-bot/hermit:97c2d1a
 ```
 
-Push it to your private registry and set `image.repository` and `image.tag` in the Helm values accordingly.
+Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (this repo is `registry.gitlab.com/hermit-bot/hermit`).
 
-The image does not bundle the opencode binary by default; reviewer pods get it from the init container. For local development you can install opencode into the image:
-
-```sh
-docker build -f docker/Dockerfile --build-arg INSTALL_OPENCODE=true -t hermit .
-```
+The image does not bundle the opencode binary by default; reviewer pods get it from the init container.
 
 ### 2. Provide the secrets
 
@@ -171,10 +174,15 @@ kubectl create secret generic report-signing --from-literal=token=$(openssl rand
 
 ### 3. Install the chart
 
+The `helm-package` pipeline job packages the chart and pushes it to
+`oci://$CI_REGISTRY_IMAGE/charts` (here `oci://registry.gitlab.com/hermit-bot/hermit/charts`). Authenticate to the registry if it is private, then install from the OCI reference (supply the chart `version` to pick a specific release):
+
 ```sh
-helm install hermit helm/hermit \
-  --set image.repository=registry.example.com/hermit \
-  --set image.tag=1.0.0 \
+helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
+helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+  --version 0.1.0 \
+  --set image.repository=registry.gitlab.com/hermit-bot/hermit \
+  --set image.tag=97c2d1a \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
@@ -201,7 +209,7 @@ helm install hermit helm/hermit \
 To use the init container for providing the opencode binary (recommended for airgapped environments), the defaults work out of the box. To use a private registry mirror, override:
 
 ```sh
-helm install hermit helm/hermit \
+helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
   ... \
   --set config.opencodeInitImage=registry.example.com/opencode:latest \
   --set config.opencodeInitBinPath=/usr/local/bin/opencode
@@ -210,7 +218,7 @@ helm install hermit helm/hermit \
 To disable the init container and bundle opencode in the reviewer pod image instead:
 
 ```sh
-helm install hermit helm/hermit \
+helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
   ... \
   --set config.opencodeInitImage=""
 ```

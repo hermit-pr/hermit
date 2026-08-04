@@ -67,7 +67,8 @@ def _parse_github_pull_request(payload: dict) -> Optional[ChangeEvent]:
         head_ref=head.get("ref", ""),
         base_sha=base.get("sha", ""),
         base_ref=base.get("ref", ""),
-        title=pull.get("title", ""),
+        pr_title=pull.get("title", ""),
+        pr_body=pull.get("body", ""),
         url=pull.get("html_url", ""),
     )
 
@@ -87,7 +88,8 @@ def _parse_github_comment(payload: dict) -> Optional[ChangeEvent]:
         action="comment",
         repo=repository.get("full_name", ""),
         ref=str(issue.get("number", "")),
-        title=issue.get("title", ""),
+        pr_title=issue.get("title", ""),
+        pr_body=issue.get("body", ""),
         url=issue.get("html_url", ""),
     )
 
@@ -125,7 +127,8 @@ def _parse_gitlab_merge_request(payload: dict) -> Optional[ChangeEvent]:
         head_sha=last_commit.get("id", ""),
         head_ref=attributes.get("source_branch", ""),
         base_ref=attributes.get("target_branch", ""),
-        title=attributes.get("title", ""),
+        pr_title=attributes.get("title", ""),
+        pr_body=attributes.get("description", ""),
         url=attributes.get("url", ""),
         source_repo=source_repo,
     )
@@ -147,7 +150,8 @@ def _parse_gitlab_note(payload: dict) -> Optional[ChangeEvent]:
         repo=project.get("path_with_namespace", ""),
         project_id=merge_request.get("iid"),
         ref=ref,
-        title=merge_request.get("title", ""),
+        pr_title=merge_request.get("title", ""),
+        pr_body=merge_request.get("description", ""),
         url=merge_request.get("url", ""),
     )
 
@@ -244,7 +248,7 @@ async def _decode_event(
         event.action,
     )
     if provider == "github" and event.action == "comment":
-        await _authorize_github_commenter(request, event, client)
+        await _authorize_github_commenter(payload, event, client)
     if not event.head_sha:
         try:
             event = await client.resolve_refs(event)
@@ -262,18 +266,17 @@ async def _decode_event(
 
 
 async def _authorize_github_commenter(
-    request: Request, event: ChangeEvent, client: GitClient
+    payload: dict, event: ChangeEvent, client: GitClient
 ) -> None:
     """Reject an ``@hermit`` comment from a user outside the org.
+
+    The ``payload`` is the already-parsed webhook body, so the request stream
+    is never read a second time.
 
     Raises:
         PermissionError: when the commenter is not a member of the org the
             repository belongs to.
     """
-    try:
-        payload = await request.json()
-    except Exception:  # pylint: disable=broad-exception-caught
-        payload = {}
     commenter = (payload.get("comment") or {}).get("user") or {}
     username = commenter.get("login", "")
     owner = event.repo.split("/")[0] if "/" in event.repo else ""
@@ -418,9 +421,6 @@ def create_app(
     @app.post("/webhook/gitlab")
     async def gitlab_webhook(request: Request) -> JSONResponse:
         """Validate and accept a GitLab webhook request."""
-        if not limiter.allow(request):
-            logger.warning("rate limit exceeded for %s", limiter.client_ip(request))
-            return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
         return await accept(
             request,
             "gitlab",

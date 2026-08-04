@@ -45,6 +45,8 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_GIT_HOST_URL": settings.git_host_url,
         "HERMIT_REPO": job.event.repo,
         "HERMIT_SOURCE_REPO": job.event.source_repo,
+        "HERMIT_PR_TITLE": job.event.pr_title,
+        "HERMIT_PR_BODY": job.event.pr_body,
         "HERMIT_HEAD_SHA": job.event.head_sha,
         "HERMIT_HEAD_REF": job.event.head_ref,
         "HERMIT_BASE_SHA": job.event.base_sha,

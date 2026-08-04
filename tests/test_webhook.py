@@ -76,6 +76,7 @@ def _github_pr_payload() -> dict:
         "pull_request": {
             "number": 7,
             "title": "Add endpoint",
+            "body": "Adds the endpoint.",
             "html_url": "https://github.example/acme/app/pull/7",
             "head": {"ref": "feature/x", "sha": "abc123"},
             "base": {"ref": "main", "sha": "def456"},
@@ -92,6 +93,7 @@ def _gitlab_payload() -> dict:
             "action": "open",
             "iid": 9,
             "title": "Add endpoint",
+            "description": "Adds the endpoint.",
             "source_branch": "feature/x",
             "target_branch": "main",
             "last_commit": {"id": "abc123"},
@@ -112,7 +114,7 @@ def _github_event() -> ChangeEvent:
         head_ref="feature/x",
         base_sha="def456",
         base_ref="main",
-        title="Add endpoint",
+        pr_title="Add endpoint",
     )
 
 
@@ -365,6 +367,8 @@ def test_parse_gitlab_same_project_has_no_source_repo() -> None:
     event = parse_gitlab(_gitlab_payload())
     assert event is not None
     assert event.source_repo == ""
+    assert event.pr_title == "Add endpoint"
+    assert event.pr_body == "Adds the endpoint."
 
 
 def test_parse_github_builds_pr_change_event() -> None:
@@ -375,6 +379,8 @@ def test_parse_github_builds_pr_change_event() -> None:
     assert event.repo == "acme/app"
     assert event.ref == "7"
     assert event.head_sha == "abc123"
+    assert event.pr_title == "Add endpoint"
+    assert event.pr_body == "Adds the endpoint."
 
 
 def test_parse_github_comment_builds_change_event() -> None:

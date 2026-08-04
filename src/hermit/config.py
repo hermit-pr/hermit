@@ -109,6 +109,8 @@ class SlaveSettings(_SettingsBase):
     git_read_token: SecretStr
     repo: str
     ref: str = ""
+    pr_title: str = ""
+    pr_body: str = ""
     source_repo: str = ""
     head_sha: str = ""
     head_ref: str = ""

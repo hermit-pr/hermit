@@ -48,7 +48,8 @@ class GitHubClient(GitClient):
             head_ref=head.get("ref", ""),
             base_sha=base.get("sha", ""),
             base_ref=base.get("ref", ""),
-            title=pull.get("title", ""),
+            pr_title=pull.get("title", ""),
+            pr_body=pull.get("body", ""),
             url=pull.get("html_url", ""),
             project_id=event.project_id,
         )

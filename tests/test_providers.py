@@ -22,7 +22,7 @@ def _github_event() -> ChangeEvent:
         head_ref="feature/x",
         base_sha="def456",
         base_ref="main",
-        title="Add endpoint",
+        pr_title="Add endpoint",
         url="https://github.example/acme/app/pull/7",
     )
 
@@ -37,7 +37,7 @@ def _gitlab_event() -> ChangeEvent:
         head_sha="abc123",
         head_ref="feature/x",
         base_ref="main",
-        title="Add endpoint",
+        pr_title="Add endpoint",
         url="https://gitlab.example/acme/app/-/merge_requests/9",
     )
 

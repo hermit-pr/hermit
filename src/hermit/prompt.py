@@ -15,6 +15,8 @@ def build_review_prompt(
     rules: str,
     diff: str,
     *,
+    pr_title: str = "",
+    pr_body: str = "",
     secret_candidates: List[str] | None = None,
     policy_file: str = "AGENTS.md",
 ) -> str:
@@ -31,6 +33,8 @@ def build_review_prompt(
         ref: pull/merge request number.
         rules: review rules that shape the output.
         diff: the raw diff of the change.
+        pr_title: the pull/merge request title.
+        pr_body: the pull/merge request description.
         secret_candidates: findings from the pre-LLM secret scan.
         policy_file: project policy file (e.g. ``AGENTS.md``) to consult.
     """
@@ -53,8 +57,12 @@ def build_review_prompt(
         f"{secret_block}\n"
         "</secret_candidates>\n\n"
         "<pr_title>\n"
-        f"{_neutralize(repo)}#{_neutralize(ref)}\n"
+        f"{_neutralize(repo)} PR {_neutralize(ref)}\n"
+        f"{_neutralize(pr_title)}\n"
         "</pr_title>\n\n"
+        "<pr_description>\n"
+        f"{_neutralize(pr_body)}\n"
+        "</pr_description>\n\n"
         "<rules>\n"
         f"{_neutralize(rules)}\n"
         "</rules>\n\n"

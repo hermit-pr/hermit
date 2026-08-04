@@ -173,7 +173,8 @@ Normalized webhook payload; same shape regardless of provider.
 | `ref` | PR number / MR IID |
 | `head_sha`, `head_ref` | head commit / source branch |
 | `base_sha`, `base_ref` | base commit / target branch |
-| `title`, `url`, `project_id` | display metadata |
+| `pr_title`, `pr_body` | PR/MR title and description fed to the reviewer |
+| `url`, `project_id` | display metadata |
 | `source_repo` | source (fork) project path for cross-project GitLab MRs |
 
 ### `ReviewJob`
