@@ -8,6 +8,7 @@ from hermit import __version__
 from hermit.config import Settings, get_settings
 from hermit.jobs import JobStore
 from hermit.k8s import build_spawner
+from hermit.logging_config import configure_logging
 from hermit.providers import build_git_client
 from hermit.server import create_app
 
@@ -24,11 +25,9 @@ def _resolve_signing_key(settings: Settings) -> str:
 def run() -> None:
     """Start the master webhook server using the configured settings."""
     settings: Settings = get_settings()
+    configure_logging(settings.log_level)
     logger.info(
-        "Starting H.E.R.M.I.T v%s on %s:%s", __version__, settings.host, settings.port
-    )
-    logger.info(
-        "starting H.E.R.M.I.T master v%s (%s provider) on %s:%d",
+        "master v%s (%s) on %s:%d",
         __version__,
         settings.git_provider,
         settings.host,

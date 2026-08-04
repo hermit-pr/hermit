@@ -56,6 +56,7 @@ config:
   # not receive a RoleBinding — they only need to exist in the namespace.
   podServiceAccount: hermit-reviewer
   reportTimeoutSeconds: 1800
+  abandonedJobTimeoutSeconds: 3600
   # Resource requests/limits for reviewer (slave) pods.
   podResources:
     requests:
@@ -64,6 +65,15 @@ config:
     limits:
       cpu: "1"
       memory: 2Gi
+  podImagePullPolicy: IfNotPresent
+  opencodeInitImagePullPolicy: IfNotPresent
+  opencodeTimeoutSeconds: 900
+  maxConcurrentJobs: 20
+  maxBodyBytes: 10485760
+  rateLimitPerIp: 60
+  rateLimitGlobal: 600
+  rateLimitWindowSeconds: 60
+  trustXForwardedFor: false
 
 # Secrets are never stored in the chart or in values. Each entry references an
 # existing Kubernetes Secret in the same namespace by name and key, so real

@@ -28,6 +28,16 @@ data:
   HERMIT_POD_MEMORY_REQUEST: {{ .Values.config.podResources.requests.memory | quote }}
   HERMIT_POD_CPU_LIMIT: {{ .Values.config.podResources.limits.cpu | quote }}
   HERMIT_POD_MEMORY_LIMIT: {{ .Values.config.podResources.limits.memory | quote }}
+  HERMIT_RATE_LIMIT_PER_IP: {{ .Values.config.rateLimitPerIp | quote }}
+  HERMIT_RATE_LIMIT_GLOBAL: {{ .Values.config.rateLimitGlobal | quote }}
+  HERMIT_RATE_LIMIT_WINDOW_SECONDS: {{ .Values.config.rateLimitWindowSeconds | quote }}
+  HERMIT_TRUST_X_FORWARDED_FOR: {{ .Values.config.trustXForwardedFor | quote }}
+  HERMIT_MAX_BODY_BYTES: {{ int .Values.config.maxBodyBytes | quote }}
+  HERMIT_MAX_CONCURRENT_JOBS: {{ .Values.config.maxConcurrentJobs | quote }}
+  HERMIT_OPCODE_TIMEOUT_SECONDS: {{ .Values.config.opencodeTimeoutSeconds | quote }}
+  HERMIT_ABANDONED_JOB_TIMEOUT_SECONDS: {{ .Values.config.abandonedJobTimeoutSeconds | quote }}
+  HERMIT_OPCODE_INIT_IMAGE_PULL_POLICY: {{ .Values.config.opencodeInitImagePullPolicy | quote }}
+  HERMIT_POD_IMAGE_PULL_POLICY: {{ .Values.config.podImagePullPolicy | quote }}
   {{- if .Values.config.opencodeArgs }}
   HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
   {{- end }}

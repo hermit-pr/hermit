@@ -15,6 +15,7 @@ from hermit.git import (
     extract_policy,
     write_askpass,
 )
+from hermit.logging_config import configure_logging
 from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
 from hermit.report import report_failure, report_review
@@ -141,7 +142,7 @@ def _handle_signal(signum: int, _frame: object) -> None:
 
 def main() -> None:
     """Run a single review and exit with a status code."""
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    configure_logging()
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
     try:

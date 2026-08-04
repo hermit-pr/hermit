@@ -250,14 +250,13 @@ async def _resolve_durable_state(
         return
     if durable is None:
         phase = await spawner.get_pod_phase(job.id)
-        if phase is None:
-            job.status = "failed"
-            job.error = "reviewer pod disappeared"
-            logger.warning("job %s: durable state and pod both gone", job.id)
-        elif phase == "Failed":
+        if phase == "Failed":
             job.status = "failed"
             job.error = "reviewer pod failed"
             logger.warning("job %s: pod entered Failed phase", job.id)
+        elif phase is None:
+            job.status = "posted"
+            logger.info("job %s: pod and secret already cleaned up", job.id)
         else:
             job.status = "posted"
             logger.info("job %s: pod %s, treating as posted", job.id, phase)
@@ -494,7 +493,6 @@ async def _launch(
             event.repo,
             event.ref,
         )
-        await store.remove(job.id)
         return JSONResponse({"status": "ignored", "job_id": job.id}, status_code=202)
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception(

@@ -82,6 +82,13 @@ class Settings(_SettingsBase):
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
+    opencode_init_image_pull_policy: str = "IfNotPresent"
+    opencode_init_resources: dict = Field(
+        default_factory=lambda: {
+            "requests": {"cpu": "50m", "memory": "64Mi"},
+            "limits": {"cpu": "200m", "memory": "128Mi"},
+        }
+    )
     opencode_timeout_seconds: int = 900
     workspace: str = "/workspace"
 
@@ -89,7 +96,9 @@ class Settings(_SettingsBase):
     pod_image: str = Field(..., description="Image to run reviewer pods")
     pod_namespace: str = ""
     pod_service_account: str = ""
+    pod_image_pull_policy: str = "IfNotPresent"
     report_timeout_seconds: int = 1800
+    abandoned_job_timeout_seconds: int = 3600
     max_concurrent_jobs: int = 20
     pod_spawner: Literal["k8s", "fake"] = "k8s"
     kube_config: str | None = None

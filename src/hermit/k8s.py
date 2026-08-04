@@ -13,8 +13,14 @@ import base64
 import logging
 import shlex
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Optional
+
+try:
+    import kubernetes  # noqa: F401
+except ImportError:  # pragma: no cover — optional for FakePodSpawner
+    kubernetes = None  # type: ignore[assignment]
 
 from hermit import __version__
 from hermit.config import Settings
@@ -24,6 +30,7 @@ from hermit.models import ChangeEvent
 logger = logging.getLogger(__name__)
 
 STATUS_ANNOTATION = "hermit.dev/status"
+OWNER_ANNOTATION = "hermit.dev/owner"
 JOB_APP_LABEL = "app"
 JOB_APP_VALUE = "hermit-review"
 JOB_LABEL_KEY = "hermit.job"
@@ -192,12 +199,12 @@ class K8sPodSpawner(PodSpawner):
         self._settings = settings
         self._client: Optional[object] = None
         self._cached_namespace: Optional[str] = None
+        self._replica_id: str = uuid.uuid4().hex[:12]
 
     def _api(self) -> object:
         """Return a lazily configured CoreV1Api client."""
         if self._client is not None:
             return self._client
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         if self._settings.kube_config:
             kubernetes.config.load_kube_config(config_file=self._settings.kube_config)
@@ -237,7 +244,6 @@ class K8sPodSpawner(PodSpawner):
 
     def _build_secret(self, job: ReviewJob, namespace: str) -> object:
         """Build the durable Kubernetes Secret for a review job."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         return kubernetes.client.V1Secret(
             metadata=kubernetes.client.V1ObjectMeta(
@@ -248,7 +254,10 @@ class K8sPodSpawner(PodSpawner):
                     JOB_LABEL_KEY: job.id,
                     "app.kubernetes.io/version": __version__,
                 },
-                annotations={STATUS_ANNOTATION: "pending"},
+                annotations={
+                    STATUS_ANNOTATION: "pending",
+                    OWNER_ANNOTATION: self._replica_id,
+                },
             ),
             type="Opaque",
             string_data={
@@ -267,7 +276,6 @@ class K8sPodSpawner(PodSpawner):
         self, environment: dict[str, str], secret_name: str
     ) -> list[object]:
         """Build the environment variables for the reviewer container."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         env_vars = [
             kubernetes.client.V1EnvVar(name=name, value=value)
@@ -308,7 +316,6 @@ class K8sPodSpawner(PodSpawner):
 
     def _build_init_container_and_volumes(self) -> tuple[list, list, list]:
         """Build init containers, volumes, and volume mounts if init image is set."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         init_containers = []
         volumes = []
@@ -329,12 +336,16 @@ class K8sPodSpawner(PodSpawner):
             init_container = kubernetes.client.V1Container(
                 name="opencode-provider",
                 image=self._settings.opencode_init_image,
+                image_pull_policy=self._settings.opencode_init_image_pull_policy,
                 command=[
                     "cp",
                     self._settings.opencode_init_bin_path,
                     "/opencode-bin/opencode",
                 ],
                 volume_mounts=volume_mounts,
+                resources=kubernetes.client.V1ResourceRequirements(
+                    **self._settings.opencode_init_resources
+                ),
                 security_context=kubernetes.client.V1SecurityContext(
                     run_as_non_root=True, run_as_user=1000, run_as_group=1000
                 ),
@@ -354,7 +365,6 @@ class K8sPodSpawner(PodSpawner):
         volume_mounts: list[object],
     ) -> object:
         """Build the reviewer pod specification."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         s = self._settings
         container_volumes = [
@@ -405,6 +415,7 @@ class K8sPodSpawner(PodSpawner):
         container = kubernetes.client.V1Container(
             name="reviewer",
             image=s.pod_image,
+            image_pull_policy=s.pod_image_pull_policy,
             command=["python", "-m", "hermit.slave"],
             env=env_vars,
             volume_mounts=volume_mounts + container_volumes,
@@ -460,7 +471,6 @@ class K8sPodSpawner(PodSpawner):
         duplicated event produces the same deterministic job id, so a second
         replica hitting an existing Secret gets a 409 and must not spawn again.
         """
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -506,7 +516,6 @@ class K8sPodSpawner(PodSpawner):
 
     async def cleanup(self, job: ReviewJob) -> None:
         """Delete the reviewer pod and its secret, ignoring not-found errors."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -532,7 +541,6 @@ class K8sPodSpawner(PodSpawner):
 
     async def get_job(self, job_id: str) -> Optional[ReviewJob]:
         """Reconstruct the durable job record from its Secret."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -568,7 +576,6 @@ class K8sPodSpawner(PodSpawner):
         Returns ``False`` when another replica changed the secret concurrently,
         meaning this replica must not publish the review a second time.
         """
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -598,7 +605,6 @@ class K8sPodSpawner(PodSpawner):
 
     async def mark_failed(self, job_id: str) -> None:
         """Best-effort record that the review could not be posted."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -618,7 +624,6 @@ class K8sPodSpawner(PodSpawner):
 
     async def get_pod_phase(self, job_id: str) -> str | None:
         """Return the pod phase for ``job_id`` or ``None`` if the pod is gone."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -626,12 +631,15 @@ class K8sPodSpawner(PodSpawner):
         try:
             pod = await asyncio.to_thread(api.read_namespaced_pod, name, namespace)
             return pod.status.phase if pod.status else None
-        except kubernetes.client.ApiException:
+        except kubernetes.client.ApiException as exc:
+            if exc.status != 404:
+                logger.warning(
+                    "get_pod_phase for %s failed (status %d)", job_id, exc.status
+                )
             return None
 
     async def list_active_job_ids(self) -> list[str]:
         """Return the job IDs of all reviewer pods that are still active."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
@@ -641,7 +649,10 @@ class K8sPodSpawner(PodSpawner):
                 namespace,
                 label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
             )
-        except kubernetes.client.ApiException:
+        except kubernetes.client.ApiException as exc:
+            logger.warning(
+                "list_active_job_ids failed in %s (status %d)", namespace, exc.status
+            )
             return []
         active = []
         for pod in pods.items or []:
@@ -660,11 +671,11 @@ class K8sPodSpawner(PodSpawner):
 
     async def sweep(self) -> None:
         """Reclaim finished or stale reviewer pods and orphaned Secrets."""
-        import kubernetes  # pylint: disable=import-outside-toplevel
 
         api = self._api()
         namespace = self._namespace()
         cutoff = time.time() - self._settings.report_timeout_seconds
+        secret_cutoff = time.time() - self._settings.abandoned_job_timeout_seconds
         try:
             pods = await asyncio.to_thread(
                 api.list_namespaced_pod,
@@ -711,7 +722,7 @@ class K8sPodSpawner(PodSpawner):
             return
         for secret in secrets.items or []:
             created = secret.metadata.creation_timestamp
-            if created is not None and created.timestamp() < cutoff:
+            if created is not None and created.timestamp() < secret_cutoff:
                 try:
                     await asyncio.to_thread(
                         api.delete_namespaced_secret, secret.metadata.name, namespace

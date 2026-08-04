@@ -1,11 +1,21 @@
 """Reporting a review back to the master from the reviewer pod."""
 
 import logging
+import os
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _ssl_verify() -> bool | str:
+    """Return the SSL verification path from environment, or True."""
+    for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        cert_path = os.environ.get(env_var)
+        if cert_path and os.path.isfile(cert_path):
+            return cert_path
+    return True
 
 
 async def report_review(
@@ -19,7 +29,7 @@ async def report_review(
     url = f"{master_url.rstrip('/')}/internal/report/{job_id}"
     headers = {"X-Hermit-Report-Secret": report_secret}
     logger.info("posting review report to %s", url)
-    client = http or httpx.AsyncClient()
+    client = http or httpx.AsyncClient(verify=_ssl_verify())
     try:
         response = await client.post(
             url, json={"body": body, "success": True}, headers=headers, timeout=120.0
@@ -45,7 +55,7 @@ def report_failure(
     url = f"{master_url.rstrip('/')}/internal/report/{job_id}"
     headers = {"X-Hermit-Report-Secret": report_secret}
     try:
-        with httpx.Client() as client:
+        with httpx.Client(verify=_ssl_verify()) as client:
             response = client.post(
                 url,
                 json={"body": f"Review failed: {error}", "success": False},
