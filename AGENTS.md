@@ -39,3 +39,4 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 
 - Integration points: GitLab/GitHub **webhook** (POST into the bot), **opencode** agent as the review driver (run as a subprocess in a workspace dir), **vLLM HTTP endpoint** for inference, and the Git host API to fetch diffs and post reviews.
 - Bot authenticates to the Git host with scoped tokens; inbound webhooks must be validated against a configured secret (GitHub HMAC `X-Hub-Signature-256`, GitLab `X-Gitlab-Token`).
+- Airgapped private PKI: the Helm chart (`caBundle` values) can inject a private root CA via an existing ConfigMap/Secret into the master and every reviewer pod (`k8s.py` mounts a `ca-bundle` volume and sets `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE`/`GIT_SSL_CAINFO`/`CURL_CA_BUNDLE`/`NODE_EXTRA_CA_CERTS` from `HERMIT_CA_BUNDLE_PATH`); the CA content itself is never stored in the chart.

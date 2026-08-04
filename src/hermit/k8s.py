@@ -27,6 +27,14 @@ JOB_APP_LABEL = "app"
 JOB_APP_VALUE = "hermit-review"
 JOB_LABEL_KEY = "hermit.job"
 SWEEP_INTERVAL_SECONDS = 300
+CA_VOLUME_NAME = "ca-bundle"
+CA_TRUST_ENV = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
 
 
 class JobAlreadyExists(Exception):
@@ -38,7 +46,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
     opencode_bin = settings.opencode_bin
     if settings.opencode_init_image:
         opencode_bin = "/opencode-bin/opencode"
-    return {
+    env = {
         "HERMIT_JOB_ID": job.id,
         "HERMIT_VERSION": __version__,
         "HERMIT_GIT_PROVIDER": settings.git_provider,
@@ -53,13 +61,18 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_BASE_REF": job.event.base_ref,
         "HERMIT_VLLM_ENDPOINT": settings.vllm_endpoint,
         "HERMIT_MODEL": settings.model,
-        "HERMIT_REVIEW_RULES": settings.review_rules,
         "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
         "HERMIT_OPCODE_BIN": opencode_bin,
         "HERMIT_OPCODE_ARGS": " ".join(settings.opencode_args),
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,
     }
+    if settings.review_rules:
+        env["HERMIT_REVIEW_RULES"] = settings.review_rules
+    if settings.ca_bundle_path:
+        for var in CA_TRUST_ENV:
+            env[var] = settings.ca_bundle_path
+    return env
 
 
 class PodSpawner(ABC):
@@ -334,6 +347,32 @@ class K8sPodSpawner(PodSpawner):
                 empty_dir=kubernetes.client.V1EmptyDirVolumeSource(),
             ),
         ]
+        if s.ca_bundle_path and s.pod_ca_mount_path:
+            container_volumes.append(
+                kubernetes.client.V1VolumeMount(
+                    name=CA_VOLUME_NAME,
+                    mount_path=s.pod_ca_mount_path,
+                    read_only=True,
+                )
+            )
+            if s.pod_ca_configmap:
+                pod_volumes.append(
+                    kubernetes.client.V1Volume(
+                        name=CA_VOLUME_NAME,
+                        config_map=kubernetes.client.V1ConfigMapVolumeSource(
+                            name=s.pod_ca_configmap
+                        ),
+                    )
+                )
+            elif s.pod_ca_secret:
+                pod_volumes.append(
+                    kubernetes.client.V1Volume(
+                        name=CA_VOLUME_NAME,
+                        secret=kubernetes.client.V1SecretVolumeSource(
+                            secret_name=s.pod_ca_secret
+                        ),
+                    )
+                )
         container = kubernetes.client.V1Container(
             name="reviewer",
             image=s.pod_image,

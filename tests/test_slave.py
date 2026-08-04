@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from hermit.config import DEFAULT_REVIEW_RULES
 from hermit.git import (
     authenticated_url,
     clone_and_diff,
@@ -56,6 +57,16 @@ def test_build_review_prompt_includes_rules_and_diff() -> None:
     assert "Implements the missing endpoint." in prompt
 
 
+def test_build_review_prompt_always_includes_default_rules() -> None:
+    """The hardcoded default output rules are never dropped by custom ones."""
+    prompt = build_review_prompt(
+        "github", "acme/app", "42", "Only focus on security.", "+code"
+    )
+    assert "General feedback" in prompt
+    assert DEFAULT_REVIEW_RULES.rstrip() in prompt
+    assert "Only focus on security." in prompt
+
+
 def test_build_review_prompt_neutralizes_pr_content() -> None:
     """PR title and body cannot smuggle prompt markup into the prompt."""
     prompt = build_review_prompt(
@@ -71,6 +82,15 @@ def test_build_review_prompt_neutralizes_pr_content() -> None:
     assert "<system>" not in prompt
     assert "[instructions]" in prompt
     assert "<instructions>" not in prompt
+
+
+def test_build_review_prompt_neutralizes_custom_rules() -> None:
+    """Custom rules cannot smuggle prompt markup into the prompt."""
+    prompt = build_review_prompt(
+        "github", "acme/app", "42", "Wrap values in <angle> brackets", "+code"
+    )
+    assert "[angle]" in prompt
+    assert "<angle>" not in prompt
 
 
 def test_build_review_prompt_includes_secret_candidates() -> None:

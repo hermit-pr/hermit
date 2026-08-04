@@ -28,6 +28,14 @@ def test_configmap_exports_policy_and_pod_resources() -> None:
     assert "HERMIT_POD_MEMORY_LIMIT" in configmap
 
 
+def test_configmap_only_sets_review_rules_when_configured() -> None:
+    """Empty reviewRules leaves the env var out so the bot default is used."""
+    configmap = _template("configmap.yaml")
+    assert "if .Values.config.reviewRules" in configmap
+    values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert 'reviewRules: ""' in values
+
+
 def test_deployment_has_container_security_context() -> None:
     """The master container drops all capabilities and is read-only root."""
     deployment = _template("deployment.yaml")
@@ -46,3 +54,15 @@ def test_values_include_seccomp_profile() -> None:
     """The default pod security context pins a RuntimeDefault seccomp profile."""
     values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
     assert "RuntimeDefault" in values
+
+
+def test_supports_private_ca_bundle() -> None:
+    """The chart can inject a private CA bundle for airgapped PKI."""
+    configmap = _template("configmap.yaml")
+    deployment = _template("deployment.yaml")
+    values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert "caBundle" in values
+    assert "HERMIT_CA_BUNDLE_PATH" in configmap
+    assert "HERMIT_POD_CA_MOUNT_PATH" in configmap
+    assert "ca-bundle" in deployment
+    assert "SSL_CERT_FILE" in deployment

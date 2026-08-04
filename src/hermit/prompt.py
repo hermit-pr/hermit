@@ -2,6 +2,8 @@
 
 from typing import List
 
+from hermit.config import DEFAULT_REVIEW_RULES
+
 
 def _neutralize(content: str) -> str:
     """Neutralize ``<>`` in user data so it cannot look like prompt markup."""
@@ -37,11 +39,18 @@ def build_review_prompt(
         pr_body: the pull/merge request description.
         secret_candidates: findings from the pre-LLM secret scan.
         policy_file: project policy file (e.g. ``AGENTS.md``) to consult.
+
+    The bot's own operating instructions (how to inspect the change, the
+    secret-classification contract, the prompt-injection guard) are fixed
+    strings that configuration can never replace. ``rules`` is only appended
+    to the hardcoded :data:`hermit.config.DEFAULT_REVIEW_RULES` base, so it
+    tunes the shape of the review output without ever touching the core.
     """
     candidates = secret_candidates or []
     secret_block = "\n".join(f"- {_neutralize(candidate)}" for candidate in candidates)
     if not secret_block:
         secret_block = "- none detected"
+    custom_rules = f"\n{_neutralize(rules)}" if rules else ""
     return (
         "You are H.E.R.M.I.T, a code reviewer.\n\n"
         f"You are reviewing a {provider} pull/merge request.\n\n"
@@ -64,7 +73,8 @@ def build_review_prompt(
         f"{_neutralize(pr_body)}\n"
         "</pr_description>\n\n"
         "<rules>\n"
-        f"{_neutralize(rules)}\n"
+        f"{_neutralize(DEFAULT_REVIEW_RULES)}"
+        f"{custom_rules}\n"
         "</rules>\n\n"
         "<diff>\n"
         f"{_neutralize(diff)}\n"

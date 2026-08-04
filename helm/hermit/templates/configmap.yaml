@@ -9,7 +9,9 @@ data:
   HERMIT_GIT_HOST_URL: {{ .Values.config.gitHostUrl | quote }}
   HERMIT_VLLM_ENDPOINT: {{ .Values.config.vllmEndpoint | quote }}
   HERMIT_MODEL: {{ .Values.config.model | quote }}
+  {{- if .Values.config.reviewRules }}
   HERMIT_REVIEW_RULES: {{ .Values.config.reviewRules | quote }}
+  {{- end }}
   HERMIT_OPCODE_BIN: {{ .Values.config.opencodeBin | quote }}
   HERMIT_WORKSPACE: {{ .Values.config.workspace | quote }}
   HERMIT_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
@@ -28,4 +30,11 @@ data:
   HERMIT_POD_MEMORY_LIMIT: {{ .Values.config.podResources.limits.memory | quote }}
   {{- if .Values.config.opencodeArgs }}
   HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
+  {{- end }}
+  {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
+  {{- $key := or .Values.caBundle.configMapKey .Values.caBundle.secretKey }}
+  HERMIT_CA_BUNDLE_PATH: {{ printf "%s/%s" .Values.caBundle.mountPath $key | quote }}
+  HERMIT_POD_CA_MOUNT_PATH: {{ .Values.caBundle.mountPath | quote }}
+  HERMIT_POD_CA_CONFIGMAP: {{ .Values.caBundle.configMap | quote }}
+  HERMIT_POD_CA_SECRET: {{ .Values.caBundle.secret | quote }}
   {{- end }}

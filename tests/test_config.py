@@ -4,7 +4,7 @@ import pytest
 from conftest import make_settings
 from pydantic import ValidationError
 
-from hermit.config import SlaveSettings
+from hermit.config import DEFAULT_REVIEW_RULES, SlaveSettings
 
 
 def test_settings_accepts_minimal_keyword_arguments() -> None:
@@ -58,9 +58,13 @@ def test_settings_splits_opencode_args() -> None:
 
 
 def test_settings_default_review_rules_define_sections() -> None:
-    """The default rules ask for the fixed review sections."""
-    rules = make_settings().review_rules
-    assert "Critical changes that need to be fixed" in rules
-    assert "Medium issues" in rules
-    assert "Low issues" in rules
-    assert "General feedback" in rules
+    """The hardcoded default rules ask for the fixed review sections."""
+    assert "Critical changes that need to be fixed" in DEFAULT_REVIEW_RULES
+    assert "Medium issues" in DEFAULT_REVIEW_RULES
+    assert "Low issues" in DEFAULT_REVIEW_RULES
+    assert "General feedback" in DEFAULT_REVIEW_RULES
+
+
+def test_settings_review_rules_defaults_to_empty() -> None:
+    """Without explicit rules the bot uses its hardcoded default in the prompt."""
+    assert make_settings().review_rules == ""

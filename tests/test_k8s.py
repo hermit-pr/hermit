@@ -72,6 +72,75 @@ def test_pod_environment_with_init_image() -> None:
     assert env["HERMIT_OPCODE_BIN"] == "/opencode-bin/opencode"
 
 
+def test_pod_environment_sets_ca_trust_env_when_configured() -> None:
+    """Reviewer pods inherit the CA trust variables when a bundle is set."""
+    settings = make_settings(ca_bundle_path="/etc/hermit/ca/ca.pem")
+    env = pod_environment(settings, make_job())
+    for var in (
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    ):
+        assert env[var] == "/etc/hermit/ca/ca.pem"
+
+
+@pytest.mark.asyncio
+async def test_k8s_pod_mounts_ca_bundle_from_configmap() -> None:
+    """A configured private CA bundle is mounted from a ConfigMap."""
+    settings = make_settings(
+        ca_bundle_path="/etc/hermit/ca/ca.pem",
+        pod_ca_mount_path="/etc/hermit/ca",
+        pod_ca_configmap="my-ca",
+    )
+    job = make_job()
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, pod = mock_api.create_namespaced_pod.call_args[0]
+        mounts = {m.name: m for m in pod.spec.containers[0].volume_mounts}
+        assert mounts["ca-bundle"].mount_path == "/etc/hermit/ca"
+        assert mounts["ca-bundle"].read_only is True
+        volumes = {v.name: v for v in pod.spec.volumes}
+        assert volumes["ca-bundle"].config_map.name == "my-ca"
+
+
+@pytest.mark.asyncio
+async def test_k8s_pod_mounts_ca_bundle_from_secret() -> None:
+    """A configured private CA bundle is mounted from a Secret."""
+    settings = make_settings(
+        ca_bundle_path="/etc/hermit/ca/ca.pem",
+        pod_ca_mount_path="/etc/hermit/ca",
+        pod_ca_secret="my-ca-secret",
+    )
+    job = make_job()
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, pod = mock_api.create_namespaced_pod.call_args[0]
+        volumes = {v.name: v for v in pod.spec.volumes}
+        assert volumes["ca-bundle"].secret.secret_name == "my-ca-secret"
+
+
 @pytest.mark.asyncio
 async def test_k8s_spawner_uses_code_version_label() -> None:
     """K8sPodSpawner labels reviewer pods with the code version."""

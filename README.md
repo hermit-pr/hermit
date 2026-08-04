@@ -79,7 +79,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_VLLM_ENDPOINT` | yes | URL of the dedicated vLLM inference endpoint |
 | `HERMIT_MODEL` | yes | name of the model served by the vLLM endpoint |
 | `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
-| `HERMIT_REVIEW_RULES` | no | instructions that shape the review behavior |
+| `HERMIT_REVIEW_RULES` | no | extra output instructions appended to the bot's hardcoded default review rules (never replaces the internal operating prompt) |
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | path to the opencode binary (default `opencode`) |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode arguments (default `run`) |
@@ -99,6 +99,8 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_POD_CPU_LIMIT`, `HERMIT_POD_MEMORY_LIMIT` | no | reviewer pod resource limits (default `1` / `2Gi`) |
 | `HERMIT_POD_SPAWNER` | no | `k8s` (default) or `fake` for local development/tests |
 | `HERMIT_KUBE_CONFIG` | no | path to a kubeconfig (outside the cluster only) |
+| `HERMIT_CA_BUNDLE_PATH` | no | path (inside pods) to a PEM CA bundle; when set, reviewer pods mount it and honour it for HTTPS (airgapped private PKI) |
+| `HERMIT_POD_CA_CONFIGMAP`, `HERMIT_POD_CA_SECRET`, `HERMIT_POD_CA_MOUNT_PATH` | no | source (ConfigMap/Secret name) and mount directory for the private CA bundle |
 | `HERMIT_HOST` | no | bind address (default `0.0.0.0`) |
 | `HERMIT_PORT` | no | HTTP port (default `8080`) |
 | `HERMIT_LOG_LEVEL` | no | Uvicorn log level (default `info`) |
@@ -224,6 +226,38 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
 ```
 
 The chart creates the master Deployment and Service, a ServiceAccount with a Role that only allows creating/deleting reviewer pods and their Secrets, plus the ConfigMap. All tokens are injected from your existing Secrets via `secretKeyRef`; nothing sensitive is rendered into the manifests. Set `rbac.enabled` to `false` if you manage RBAC yourself.
+
+#### Private CA for airgapped deployments (private PKI)
+
+When your GitLab/GitHub instance or vLLM endpoint is signed by a **private
+Certificate Authority** (common in fully airgapped environments), the master
+and every reviewer pod must trust it. Provide a PEM bundle of your private
+root CA(s) in an existing ConfigMap or Secret and reference it through the
+`caBundle` values:
+
+```yaml
+caBundle:
+  configMap: ca-bundle-cm    # or: secret: ca-bundle-secret
+  configMapKey: ca.pem       # key holding the PEM bundle
+  mountPath: /etc/hermit/ca
+```
+
+The bundle is mounted read-only into the master and into each reviewer pod and
+becomes the trust store for HTTPS (Git host API, vLLM endpoint) and for
+`git clone`, via `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`,
+`CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`. Only the volume source name is
+referenced — the certificate content never appears in the manifests. `configMap`
+takes precedence when both `configMap` and `secret` are set.
+
+```sh
+kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
+
+helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+  --version 0.1.0 \
+  --set ... \
+  --set caBundle.configMap=ca-bundle-cm \
+  --set caBundle.configMapKey=ca.pem
+```
 
 ### 4. Configure the webhooks
 

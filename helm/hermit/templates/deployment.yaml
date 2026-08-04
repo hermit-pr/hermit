@@ -75,6 +75,26 @@ spec:
                   name: {{ .Values.secrets.jobIdSigningKey.name | quote }}
                   key: {{ .Values.secrets.jobIdSigningKey.key | required "secrets.jobIdSigningKey.key is required" | quote }}
             {{- end }}
+            {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
+            {{- $key := or .Values.caBundle.configMapKey .Values.caBundle.secretKey }}
+            {{- $caPath := printf "%s/%s" .Values.caBundle.mountPath $key }}
+            - name: SSL_CERT_FILE
+              value: {{ $caPath | quote }}
+            - name: REQUESTS_CA_BUNDLE
+              value: {{ $caPath | quote }}
+            - name: GIT_SSL_CAINFO
+              value: {{ $caPath | quote }}
+            - name: CURL_CA_BUNDLE
+              value: {{ $caPath | quote }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: {{ $caPath | quote }}
+            {{- end }}
+          volumeMounts:
+            {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
+            - name: ca-bundle
+              mountPath: {{ .Values.caBundle.mountPath | quote }}
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -85,6 +105,16 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        {{- if .Values.caBundle.configMap }}
+        - name: ca-bundle
+          configMap:
+            name: {{ .Values.caBundle.configMap | quote }}
+        {{- else if .Values.caBundle.secret }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ .Values.caBundle.secret | quote }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

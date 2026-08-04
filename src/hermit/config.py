@@ -63,7 +63,7 @@ class Settings(_SettingsBase):
     job_id_signing_key: SecretStr | None = None
     vllm_endpoint: str = Field(..., description="URL of the vLLM inference endpoint")
     model: str = Field(..., description="Model served by the vLLM endpoint")
-    review_rules: str = DEFAULT_REVIEW_RULES
+    review_rules: str = ""
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
 
@@ -90,6 +90,15 @@ class Settings(_SettingsBase):
     report_timeout_seconds: int = 1800
     pod_spawner: Literal["k8s", "fake"] = "k8s"
     kube_config: str | None = None
+
+    # Private PKI support for airgapped deployments. When ``ca_bundle_path``
+    # is set, reviewer pods receive a read-only mount of the CA bundle and the
+    # trust environment variables (``SSL_CERT_FILE``, ``REQUESTS_CA_BUNDLE``,
+    # ``GIT_SSL_CAINFO``, ``CURL_CA_BUNDLE``, ``NODE_EXTRA_CA_CERTS``).
+    ca_bundle_path: str = ""
+    pod_ca_configmap: str = ""
+    pod_ca_secret: str = ""
+    pod_ca_mount_path: str = ""
 
     host: str = "0.0.0.0"
     port: int = 8080
@@ -118,7 +127,7 @@ class SlaveSettings(_SettingsBase):
     base_ref: str = ""
     vllm_endpoint: str
     model: str
-    review_rules: str = DEFAULT_REVIEW_RULES
+    review_rules: str = ""
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
     opencode_bin: str = "opencode"

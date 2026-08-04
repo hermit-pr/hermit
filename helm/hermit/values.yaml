@@ -1,7 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: registry.example.com/hermit
+  # Built and pushed by the docker-build CI job.
+  repository: registry.gitlab.com/hermit-bot/hermit
   # Defaults to Chart.appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent
@@ -17,13 +18,9 @@ config:
   gitHostUrl: https://github.example.com
   vllmEndpoint: http://vllm.example.com:8000/v1
   model: llama-3.1-8b-instruct
-  reviewRules: |-
-    Write the review as a single markdown comment with these four sections, in this order:
-    - ## Critical changes that need to be fixed
-    - ## Medium issues
-    - ## Low issues
-    - ## General feedback
-    Put bugs, security holes and crashes under critical; logic problems and missing edge cases under medium; style and minor refactors under low. Be concise and concrete.
+  # Optional. Extra output instructions appended to the bot's hardcoded
+  # default review output; never replaces the internal operating prompt.
+  reviewRules: ""
   opencodeBin: opencode
   opencodeArgs:
     - run
@@ -76,6 +73,22 @@ secrets:
   vllmApiKey:
     name: ""
     key: ""
+
+# Private PKI support for airgapped deployments. Reference an existing
+# ConfigMap or Secret (same namespace) holding a PEM CA bundle under the given
+# key. The bundle is mounted read-only into the master and into every reviewer
+# pod and becomes the trust store for HTTPS calls (Git host, vLLM endpoint,
+# git clone), so put your private root CA(s) in it.
+# Precedence: configMap wins when both are set.
+caBundle:
+  # Existing ConfigMap holding the PEM bundle.
+  configMap: ""
+  configMapKey: "ca.pem"
+  # Existing Secret holding the PEM bundle.
+  secret: ""
+  secretKey: "ca.pem"
+  # Directory the bundle is mounted into.
+  mountPath: /etc/hermit/ca
 
 rbac:
   enabled: true
