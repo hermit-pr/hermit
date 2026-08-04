@@ -129,14 +129,16 @@ def _handle_signal(signum: int, _frame: object) -> None:
     logger.warning("received signal %d, reporting failure", signum)
     try:
         settings = SlaveSettings()
-        report_failure(
-            settings.master_url,
-            settings.job_id,
-            settings.report_secret.get_secret_value(),
-            f"terminated by signal {signum}",
-        )
     except Exception:  # pylint: disable=broad-exception-caught
-        logger.debug("could not report failure from signal handler")
+        # Signal handler — must never crash the process
+        logger.warning("cannot load settings in signal handler, exiting")
+        sys.exit(1)
+    report_failure(
+        settings.master_url,
+        settings.job_id,
+        settings.report_secret.get_secret_value(),
+        f"terminated by signal {signum}",
+    )
     sys.exit(1)
 
 
@@ -148,5 +150,6 @@ def main() -> None:
     try:
         asyncio.run(run_review(SlaveSettings()))
     except Exception:  # pylint: disable=broad-exception-caught
+        # Process entrypoint — catch all for clean exit code
         logger.exception("review failed")
         raise SystemExit(1) from None

@@ -50,7 +50,7 @@ You are strictly monitored by Pylint. You must output clean code, but pragmatism
 - `R0903 (too-few-public-methods)`: Allowed for Pydantic models, Dataclasses, and config objects.
 - `R0913 (too-many-arguments)` & `R0917 (too-many-positional-arguments)`: Allowed ONLY when instantiating official Kubernetes API objects (e.g., `V1Pod`, `V1Job`).
 - `W0511 (fixme)`: Allowed. Do not block CI on `# TODO` or `# FIXME`.
-- `W0718 (broad-exception-caught)`: Allowed ONLY at the very top of FastAPI entrypoints (to return generic 500s) or within the outermost loop of a K8s watcher. For all other logic, catch specific exceptions.
+- `W0718 (broad-exception-caught)`: Allowed ONLY at the very top of FastAPI entrypoints (to return generic 500s), within the outermost loop of a K8s watcher or background maintenance task (sweeper, evictor), in process entrypoints (`main()`), or in signal handlers. For all other logic, catch specific exceptions.
 - `C0415 (import-outside-toplevel)`: Tolerated ONLY to prevent circular dependencies in FastAPI routers/schemas. Do not abuse it.
 - `R0914 (too-many-locals)`, `R0915 (too-many-statements)`, `R0911 (too-many-return-statements)`: Tolerated ONLY in the main Webhook payload parsing function, where flattening the complex JSON inevitably creates large structural blocks.
 - `W0212 (protected-access)`: Tolerated ONLY if absolutely necessary to interface with undocumented behaviors of the `kubernetes-client`.

@@ -19,8 +19,14 @@ from typing import Optional
 
 try:
     import kubernetes  # noqa: F401
+
+    K8sApiError = kubernetes.client.ApiException
 except ImportError:  # pragma: no cover — optional for FakePodSpawner
     kubernetes = None  # type: ignore[assignment]
+
+    class K8sApiError(Exception):
+        """Fallback when the kubernetes client is not installed."""
+
 
 from hermit import __version__
 from hermit.config import Settings

@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Callable, Optional
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -20,6 +21,7 @@ from hermit.jobs import JobStore, ReviewJob
 from hermit.k8s import (
     SWEEP_INTERVAL_SECONDS,
     JobAlreadyExists,
+    K8sApiError,
     PodSpawner,
     pod_environment,
 )
@@ -220,7 +222,7 @@ async def _fetch_durable(
     """
     try:
         return (await spawner.get_job(job.id)), 0
-    except Exception:  # pylint: disable=broad-exception-caught
+    except K8sApiError:
         if retries >= WATCH_RETRY_ATTEMPTS:
             logger.warning(
                 "job %s: giving up after %d K8s API retries", job.id, retries
@@ -295,7 +297,7 @@ async def _watch_job(
                             description="Review timed out.",
                             context="hermit/review",
                         )
-                    except Exception:  # pylint: disable=broad-exception-caught
+                    except httpx.HTTPError:
                         logger.warning(
                             "failed to set error status for %s#%s",
                             job.event.repo,
@@ -328,6 +330,7 @@ async def _sweeper(spawner: PodSpawner) -> None:
         try:
             await spawner.sweep()
         except Exception:  # pylint: disable=broad-exception-caught
+            # Background maintenance loop — must never terminate
             logger.exception("sweep of reviewer pods failed")
 
 
@@ -338,6 +341,7 @@ async def _evictor(store: JobStore) -> None:
         try:
             store.evict()
         except Exception:  # pylint: disable=broad-exception-caught
+            # Background maintenance loop — must never terminate
             logger.exception("eviction of stale jobs failed")
 
 
@@ -381,7 +385,7 @@ async def _decode_event(
     if not event.head_sha:
         try:
             event = await client.resolve_refs(event)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except httpx.HTTPError:
             logger.exception(
                 "failed to resolve refs for %s %s#%s",
                 provider,
@@ -494,7 +498,7 @@ async def _launch(
             event.ref,
         )
         return JSONResponse({"status": "ignored", "job_id": job.id}, status_code=202)
-    except Exception:  # pylint: disable=broad-exception-caught
+    except K8sApiError:
         logger.exception(
             "failed to spawn reviewer pod for %s %s#%s",
             provider,
@@ -515,7 +519,7 @@ async def _launch(
                 description="H.E.R.M.I.T is reviewing...",
                 context="hermit/review",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except httpx.HTTPError:
             logger.warning(
                 "failed to set pending status for %s#%s", event.repo, event.ref
             )
@@ -543,7 +547,7 @@ async def _handle_report_failure(
                 description="Review failed (pod error).",
                 context="hermit/review",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except httpx.HTTPError:
             logger.warning(
                 "failed to set error status for %s#%s",
                 job.event.repo,
@@ -610,11 +614,11 @@ def create_app(
         """Run a first sweep and keep reclaiming orphaned jobs on a timer."""
         try:
             await spawner.sweep()
-        except Exception:  # pylint: disable=broad-exception-caught
+        except K8sApiError:
             logger.exception("initial sweep failed")
         try:
             await _recover_watchers(spawner, track, settings.report_timeout_seconds)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except K8sApiError:
             logger.exception("recovery of orphan watchers failed")
         for task in (_sweeper(spawner), _evictor(store)):
             created = asyncio.create_task(task)
@@ -719,7 +723,7 @@ def create_app(
             return JSONResponse({"status": "ok"}, status_code=200)
         try:
             payload = await request.json()
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         body = payload.get("body", "")
         success = payload.get("success", True)
@@ -733,7 +737,7 @@ def create_app(
             return JSONResponse({"status": "ok"}, status_code=200)
         try:
             await client.post_review(job.event, body)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except httpx.HTTPError:
             logger.exception(
                 "failed to submit review for %s %s#%s",
                 job.event.provider,
@@ -747,7 +751,7 @@ def create_app(
                     description="Review submission failed.",
                     context="hermit/review",
                 )
-            except Exception:  # pylint: disable=broad-exception-caught
+            except httpx.HTTPError:
                 logger.warning(
                     "failed to set failure status for %s#%s",
                     job.event.repo,
@@ -758,7 +762,7 @@ def create_app(
             job.reported.set()
             try:
                 await spawner.mark_failed(job_id)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except K8sApiError:
                 logger.debug("could not mark durable state failed for %s", job_id)
             return JSONResponse({"error": "review submission failed"}, status_code=502)
         job.body = body
@@ -771,7 +775,7 @@ def create_app(
                 description="Review completed.",
                 context="hermit/review",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except httpx.HTTPError:
             logger.warning(
                 "failed to set success status for %s#%s",
                 job.event.repo,

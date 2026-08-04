@@ -35,7 +35,7 @@ class FakeClient(GitClient):
         self.posted.append(body)
 
     async def set_commit_status(
-        self, _event: ChangeEvent, state: str, _description: str, _context: str
+        self, _event: ChangeEvent, state: str, description: str, context: str
     ) -> None:
         """Record a commit status update."""
         self.statuses.append(state)
