@@ -90,6 +90,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_POD_NAMESPACE` | no | namespace for pods/secrets (default: in-cluster namespace) |
 | `HERMIT_POD_SERVICE_ACCOUNT` | no | ServiceAccount for reviewer pods |
 | `HERMIT_REPORT_TIMEOUT_SECONDS` | no | max wait for a review before failing the job (default 1800) |
+| `HERMIT_ABANDONED_JOB_TIMEOUT_SECONDS` | no | max age of an orphaned job Secret before sweep deletes it (default 3600) |
 | `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess inside the reviewer pod (default 900) |
 | `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods a single replica may have in flight at once (default 20) |
 | `HERMIT_RATE_LIMIT_PER_IP` | no | max requests per source IP per window (default 60) |
@@ -146,10 +147,12 @@ The `docker-build` pipeline job builds the image and pushes it to your GitLab Co
 - every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
 - tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
 
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.1.0`), so the versioned image is used automatically.
+
 For example:
 
 ```sh
-docker pull registry.gitlab.com/hermit-bot/hermit:97c2d1a
+docker pull registry.gitlab.com/hermit-bot/hermit:0.1.0
 ```
 
 Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (this repo is `registry.gitlab.com/hermit-bot/hermit`).
@@ -186,7 +189,6 @@ helm registry login registry.gitlab.com -u <username> -p <password>   # only if 
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
   --version 0.1.0 \
   --set image.repository=registry.gitlab.com/hermit-bot/hermit \
-  --set image.tag=97c2d1a \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
@@ -307,7 +309,7 @@ HERMIT_POD_SPAWNER=fake \
 
 ## Status
 
-H.E.R.M.I.T is under active development. The master, reviewer pods, providers, opencode integration and deployment assets are implemented; review behavior is refined through the `HERMIT_REVIEW_RULES` setting.
+**v0.1.0 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
 
 ## License
 

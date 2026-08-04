@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Initial development of H.E.R.M.I.T, the airgapped code-review bot for on-premise
-GitLab and GitHub. Not released yet — will be validated against a second lab
-environment before tagging `v0.1.0`.
+## [0.1.0] - 2026-08-04
+
+First release of H.E.R.M.I.T, the airgapped code-review bot for on-premise
+GitLab and GitHub.
 
 ### Added
 
@@ -102,3 +103,9 @@ environment before tagging `v0.1.0`.
 - Durable state inconsistency when `post_review` fails after `mark_posted`.
 - `HERMIT_OPCODE_ARGS` joined with `shlex.join` to preserve quoting.
 - Sweep marks durable state `failed` before deleting secrets for Failed pods.
+- `mark_failed` uses CAS (resource-version check) to prevent overwriting `posted` status.
+- All remaining pylint `broad-exception-caught` replaced with specific exceptions.
+- `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
+
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...main
+[0.1.0]: https://gitlab.com/hermit-bot/hermit/-/tags/v0.1.0
