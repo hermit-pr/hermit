@@ -290,14 +290,26 @@ async def _authorize_github_commenter(
 
     Raises:
         PermissionError: when the commenter is not a member of the org the
-            repository belongs to.
+            repository belongs to and not a collaborator on the repo.
     """
     commenter = (payload.get("comment") or {}).get("user") or {}
     username = commenter.get("login") or ""
     owner = event.repo.split("/")[0] if "/" in event.repo else ""
-    if not username or not await client.check_membership(owner, username):
-        logger.warning("rejected @hermit comment from non-member %s", username)
+    if not username:
+        logger.warning("rejected @hermit comment: no username")
         raise PermissionError("commenter is not a repository member")
+    is_member = await client.check_membership(owner, username)
+    if not is_member:
+        # Fallback: check if user is a collaborator on the repo
+        # This handles outside collaborators and tokens with only 'repo' scope
+        is_collaborator = await client.check_repo_collaborator(event.repo, username)
+        if not is_collaborator:
+            logger.warning(
+                "rejected @hermit comment from non-member/non-collaborator %s on %s",
+                username,
+                event.repo,
+            )
+            raise PermissionError("commenter is not a repository member")
 
 
 # pylint: disable=too-many-positional-arguments

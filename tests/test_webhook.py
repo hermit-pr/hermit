@@ -55,6 +55,10 @@ class NoMembershipClient(FakeClient):
         """Reject every commenter."""
         return False
 
+    async def check_repo_collaborator(self, _repo: str, _username: str) -> bool:
+        """Reject every commenter."""
+        return False
+
 
 def _settings(**overrides) -> Settings:
     """Build settings with a small report timeout for tests."""

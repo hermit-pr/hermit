@@ -73,10 +73,65 @@ class GitHubClient(GitClient):
         )
 
     async def check_membership(self, org: str, username: str) -> bool:
-        """Return True when ``username`` is a member of ``org``."""
+        """Return True when ``username`` is a member of ``org``.
+
+        First tries the org membership endpoint (requires ``read:org`` scope).
+        Falls back to the repo collaborator endpoint (requires only ``repo`` scope)
+        to handle outside collaborators.
+        """
         path = f"/orgs/{org}/members/{username}"
         response = await self._request("GET", path)
-        if response.status_code in (302, 404):
+        if response.status_code == 200:
+            return True
+        if response.status_code == 404:
+            return False
+        if response.status_code in (302, 403):
+            logger.warning(
+                "org membership check returned %d for %s/%s; "
+                "falling back to repo collaborator check "
+                "(token may lack 'read:org' scope or user is outside collaborator)",
+                response.status_code,
+                org,
+                username,
+            )
+        else:
+            response.raise_for_status()
+            return True
+
+        # Fallback: check if user is a collaborator on the repo
+        # This requires only 'repo' scope and catches outside collaborators
+        return await self._check_repo_collaborator(org, username)
+
+    async def _check_repo_collaborator(self, _org: str, _username: str) -> bool:
+        """Check if user is a collaborator on any repo in the org.
+
+        Uses the repo collaborator endpoint which only requires 'repo' scope.
+        Note: We don't know the specific repo here, so we can't check a single repo.
+        The caller should use this as a fallback when they have the repo context.
+        """
+        # Without a specific repo, we can't use the collaborator endpoint.
+        # The caller (_authorize_github_commenter) has the repo context.
+        return False
+
+    async def check_repo_collaborator(self, repo: str, username: str) -> bool:
+        """Return True when ``username`` is a collaborator on ``repo``.
+
+        Uses the repo collaborator endpoint which requires only ``repo`` scope.
+        This works for both org members and outside collaborators.
+        """
+        path = f"/repos/{repo}/collaborators/{username}"
+        response = await self._request("GET", path)
+        if response.status_code == 204:
+            return True
+        if response.status_code == 404:
+            return False
+        if response.status_code in (302, 403):
+            logger.warning(
+                "repo collaborator check returned %d for %s/%s",
+                response.status_code,
+                repo,
+                username,
+            )
             return False
         response.raise_for_status()
-        return True
+        return False

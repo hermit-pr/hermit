@@ -59,6 +59,14 @@ class GitClient(ABC):
         """Return True when ``username`` is a member of ``org``."""
         return True
 
+    async def check_repo_collaborator(self, _repo: str, _username: str) -> bool:
+        """Return True when ``username`` is a collaborator on ``repo``.
+
+        Used as fallback when org membership check fails or is unavailable.
+        Only requires ``repo`` scope on GitHub.
+        """
+        return True
+
     async def _request(
         self, method: str, path: str, **kwargs: object
     ) -> httpx.Response:
