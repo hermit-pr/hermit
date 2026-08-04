@@ -61,15 +61,15 @@ def _parse_github_pull_request(payload: dict) -> Optional[ChangeEvent]:
     return ChangeEvent(
         provider="github",
         action=action,
-        repo=repository.get("full_name", ""),
-        ref=str(pull.get("number", "")),
-        head_sha=head.get("sha", ""),
-        head_ref=head.get("ref", ""),
-        base_sha=base.get("sha", ""),
-        base_ref=base.get("ref", ""),
-        pr_title=pull.get("title", ""),
-        pr_body=pull.get("body", ""),
-        url=pull.get("html_url", ""),
+        repo=repository.get("full_name") or "",
+        ref=str(pull.get("number") or ""),
+        head_sha=head.get("sha") or "",
+        head_ref=head.get("ref") or "",
+        base_sha=base.get("sha") or "",
+        base_ref=base.get("ref") or "",
+        pr_title=pull.get("title") or "",
+        pr_body=pull.get("body") or "",
+        url=pull.get("html_url") or "",
     )
 
 
@@ -79,18 +79,18 @@ def _parse_github_comment(payload: dict) -> Optional[ChangeEvent]:
     comment = payload.get("comment") or {}
     if (
         "pull_request" not in issue
-        or BOT_MENTION not in comment.get("body", "").lower()
+        or BOT_MENTION not in (comment.get("body") or "").lower()
     ):
         return None
     repository = payload.get("repository") or {}
     return ChangeEvent(
         provider="github",
         action="comment",
-        repo=repository.get("full_name", ""),
-        ref=str(issue.get("number", "")),
-        pr_title=issue.get("title", ""),
-        pr_body=issue.get("body", ""),
-        url=issue.get("html_url", ""),
+        repo=repository.get("full_name") or "",
+        ref=str(issue.get("number") or ""),
+        pr_title=issue.get("title") or "",
+        pr_body=issue.get("body") or "",
+        url=issue.get("html_url") or "",
     )
 
 
@@ -110,26 +110,26 @@ def parse_gitlab(payload: dict) -> Optional[ChangeEvent]:
 def _parse_gitlab_merge_request(payload: dict) -> Optional[ChangeEvent]:
     """Parse a GitLab merge request event."""
     attributes = payload.get("object_attributes") or {}
-    action = attributes.get("action", "")
+    action = attributes.get("action") or ""
     if action not in GITLAB_ACTIONS:
         return None
     project = payload.get("project") or {}
     last_commit = attributes.get("last_commit") or {}
-    source = (attributes.get("source") or {}).get("path_with_namespace", "")
-    target = project.get("path_with_namespace", "")
+    source = (attributes.get("source") or {}).get("path_with_namespace") or ""
+    target = project.get("path_with_namespace") or ""
     source_repo = source if source and source != target else ""
     return ChangeEvent(
         provider="gitlab",
         action=action,
         repo=target,
         project_id=attributes.get("iid"),
-        ref=str(attributes.get("iid", "")),
-        head_sha=last_commit.get("id", ""),
-        head_ref=attributes.get("source_branch", ""),
-        base_ref=attributes.get("target_branch", ""),
-        pr_title=attributes.get("title", ""),
-        pr_body=attributes.get("description", ""),
-        url=attributes.get("url", ""),
+        ref=str(attributes.get("iid") or ""),
+        head_sha=last_commit.get("id") or "",
+        head_ref=attributes.get("source_branch") or "",
+        base_ref=attributes.get("target_branch") or "",
+        pr_title=attributes.get("title") or "",
+        pr_body=attributes.get("description") or "",
+        url=attributes.get("url") or "",
         source_repo=source_repo,
     )
 
@@ -139,20 +139,20 @@ def _parse_gitlab_note(payload: dict) -> Optional[ChangeEvent]:
     attributes = payload.get("object_attributes") or {}
     if attributes.get("noteable_type") != "MergeRequest":
         return None
-    if BOT_MENTION not in attributes.get("note", "").lower():
+    if BOT_MENTION not in (attributes.get("note") or "").lower():
         return None
     project = payload.get("project") or {}
     merge_request = payload.get("merge_request") or {}
-    ref = str(merge_request.get("iid", "") or attributes.get("noteable_iid", ""))
+    ref = str(merge_request.get("iid") or attributes.get("noteable_iid") or "")
     return ChangeEvent(
         provider="gitlab",
         action="comment",
-        repo=project.get("path_with_namespace", ""),
+        repo=project.get("path_with_namespace") or "",
         project_id=merge_request.get("iid"),
         ref=ref,
-        pr_title=merge_request.get("title", ""),
-        pr_body=merge_request.get("description", ""),
-        url=merge_request.get("url", ""),
+        pr_title=merge_request.get("title") or "",
+        pr_body=merge_request.get("description") or "",
+        url=merge_request.get("url") or "",
     )
 
 
@@ -293,7 +293,7 @@ async def _authorize_github_commenter(
             repository belongs to.
     """
     commenter = (payload.get("comment") or {}).get("user") or {}
-    username = commenter.get("login", "")
+    username = commenter.get("login") or ""
     owner = event.repo.split("/")[0] if "/" in event.repo else ""
     if not username or not await client.check_membership(owner, username):
         logger.warning("rejected @hermit comment from non-member %s", username)

@@ -32,7 +32,10 @@ data:
   HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
   {{- end }}
   {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
-  {{- $key := or .Values.caBundle.configMapKey .Values.caBundle.secretKey }}
+  {{- $key := .Values.caBundle.secretKey }}
+  {{- if .Values.caBundle.configMap }}
+  {{- $key = .Values.caBundle.configMapKey }}
+  {{- end }}
   HERMIT_CA_BUNDLE_PATH: {{ printf "%s/%s" .Values.caBundle.mountPath $key | quote }}
   HERMIT_POD_CA_MOUNT_PATH: {{ .Values.caBundle.mountPath | quote }}
   HERMIT_POD_CA_CONFIGMAP: {{ .Values.caBundle.configMap | quote }}

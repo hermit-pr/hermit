@@ -76,7 +76,10 @@ spec:
                   key: {{ .Values.secrets.jobIdSigningKey.key | required "secrets.jobIdSigningKey.key is required" | quote }}
             {{- end }}
             {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
-            {{- $key := or .Values.caBundle.configMapKey .Values.caBundle.secretKey }}
+            {{- $key := .Values.caBundle.secretKey }}
+            {{- if .Values.caBundle.configMap }}
+            {{- $key = .Values.caBundle.configMapKey }}
+            {{- end }}
             {{- $caPath := printf "%s/%s" .Values.caBundle.mountPath $key }}
             - name: SSL_CERT_FILE
               value: {{ $caPath | quote }}
