@@ -22,6 +22,15 @@ It is built to run fully **airgapped**: no external SaaS, no cloud services, no 
 - **Airgapped** — fully self-contained; no data leaves your network.
 - **Never merges or commits** — its only write action is posting a review comment.
 
+## Why H.E.R.M.I.T vs Official OpenCode Integrations?
+
+While OpenCode provides official GitHub Actions and GitLab CI components, they are designed for standard, cloud-based workflows. H.E.R.M.I.T is built specifically to solve Enterprise IT and strict security constraints:
+
+- **CI-Agnostic (No Runners needed):** If your enterprise uses Jenkins, Bamboo, or TeamCity, you cannot use the official GitHub/GitLab runner integrations. H.E.R.M.I.T operates entirely outside your CI pipeline by intercepting webhooks and spawning its own pods.
+- **Centralized Management:** The official integrations require you to commit a `.github/workflows/opencode.yml` or `.gitlab-ci.yml` file into every single repository. H.E.R.M.I.T operates via a single Organization/Group-level webhook. You deploy and update the bot in one place for your entire company.
+- **True Air-Gap & Private PKI:** The official actions struggle when talking to on-premise Git instances or local vLLM endpoints signed by corporate Certificate Authorities. H.E.R.M.I.T natively supports injecting your private root CAs (`HERMIT_CA_BUNDLE_PATH`) to ensure all internal HTTPS traffic is trusted.
+- **Zero-Trust Isolation:** Running AI-generated code inside your standard CI runners can expose production secrets or Docker sockets. H.E.R.M.I.T sandboxes the AI in an ephemeral, unprivileged Kubernetes Pod (UID 1000, read-only root filesystem, capabilities dropped), completely segregated from your actual build environment.
+
 ## Architecture
 
 H.E.R.M.I.T has two roles running the same container image:
