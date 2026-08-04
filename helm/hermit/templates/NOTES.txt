@@ -1,10 +1,19 @@
 H.E.R.M.I.T has been deployed as {{ include "hermit.fullname" . }}.
 
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+Point your GitLab/GitHub webhook at the bot:
+
+  GitHub: POST https://{{ .host }}/webhook/github  (validate with X-Hub-Signature-256)
+  GitLab: POST https://{{ .host }}/webhook/gitlab  (validate with X-Gitlab-Token)
+{{- end }}
+{{- else }}
 Point your GitLab/GitHub webhook at the bot so it can publish a review on
 every PR/MR:
 
   GitHub: POST https://<host>/webhook/github  (validate with X-Hub-Signature-256)
   GitLab: POST https://<host>/webhook/gitlab  (validate with X-Gitlab-Token)
+{{- end }}
 
 Reviews are also triggered when someone writes "@hermit" in a PR/MR comment.
 

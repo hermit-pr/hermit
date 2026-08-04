@@ -13,6 +13,20 @@ service:
   type: ClusterIP
   port: 8080
 
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: hermit.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: hermit-tls
+  #    hosts:
+  #      - hermit.example.com
+
 config:
   gitProvider: github
   gitHostUrl: https://github.example.com
