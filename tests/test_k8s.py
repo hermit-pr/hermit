@@ -117,6 +117,46 @@ async def test_k8s_pod_is_hardened() -> None:
 
 
 @pytest.mark.asyncio
+async def test_k8s_pod_has_resources_and_security_context() -> None:
+    """Reviewer pods carry resource bounds and a locked-down security context."""
+    settings = make_settings()
+    job = make_job()
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, pod = mock_api.create_namespaced_pod.call_args[0]
+        container = pod.spec.containers[0]
+
+        assert container.resources.requests["cpu"] == "200m"
+        assert container.resources.requests["memory"] == "512Mi"
+        assert container.resources.limits["cpu"] == "1"
+        assert container.resources.limits["memory"] == "2Gi"
+
+        context = container.security_context
+        assert context.run_as_non_root is True
+        assert context.run_as_user == 1000
+        assert context.run_as_group == 1000
+        assert context.read_only_root_filesystem is True
+        assert context.allow_privilege_escalation is False
+        assert context.capabilities.drop == ["ALL"]
+
+        pod_context = pod.spec.security_context
+        assert pod_context.run_as_user == 1000
+        assert pod_context.run_as_group == 1000
+        assert pod_context.fs_group == 1000
+        assert pod_context.seccomp_profile.type == "RuntimeDefault"
+
+
+@pytest.mark.asyncio
 async def test_k8s_job_secret_is_durable() -> None:
     """The job secret carries the event, labels, and a status annotation."""
     settings = make_settings()
@@ -229,17 +269,21 @@ async def test_k8s_spawner_adds_init_container_when_enabled() -> None:
         assert init_container.volume_mounts[0].name == "opencode-bin"
         assert init_container.volume_mounts[0].mount_path == "/opencode-bin"
 
-        # Check main container has volume mount
+        # Check main container has volume mounts
         assert pod.spec.containers[0].volume_mounts is not None
-        assert len(pod.spec.containers[0].volume_mounts) == 1
-        assert pod.spec.containers[0].volume_mounts[0].name == "opencode-bin"
-        assert pod.spec.containers[0].volume_mounts[0].mount_path == "/opencode-bin"
+        mounts = {m.name: m for m in pod.spec.containers[0].volume_mounts}
+        assert mounts["opencode-bin"].mount_path == "/opencode-bin"
+        assert mounts["workspace"].mount_path == "/workspace"
+        assert mounts["tmp"].mount_path == "/tmp"
+        assert mounts["home"].mount_path == "/home/hermit"
 
-        # Check volume exists
+        # Check volumes exist
         assert pod.spec.volumes is not None
-        assert len(pod.spec.volumes) == 1
-        assert pod.spec.volumes[0].name == "opencode-bin"
-        assert pod.spec.volumes[0].empty_dir is not None
+        names = {v.name: v for v in pod.spec.volumes}
+        assert names["opencode-bin"].empty_dir is not None
+        assert names["workspace"].empty_dir is not None
+        assert names["tmp"].empty_dir is not None
+        assert names["home"].empty_dir is not None
 
 
 @pytest.mark.asyncio
@@ -267,14 +311,15 @@ async def test_k8s_spawner_no_init_container_when_disabled() -> None:
         # Check no init containers
         assert pod.spec.init_containers is None or len(pod.spec.init_containers) == 0
 
-        # Check no volumes
-        assert pod.spec.volumes is None or len(pod.spec.volumes) == 0
+        # Check the runtime volumes are still present
+        assert pod.spec.volumes is not None
+        names = {v.name for v in pod.spec.volumes}
+        assert names == {"workspace", "tmp", "home"}
 
-        # Check main container has no volume mounts
-        assert (
-            pod.spec.containers[0].volume_mounts is None
-            or len(pod.spec.containers[0].volume_mounts) == 0
-        )
+        # Check main container only mounts the runtime volumes
+        assert pod.spec.containers[0].volume_mounts is not None
+        mounts = {m.name for m in pod.spec.containers[0].volume_mounts}
+        assert mounts == {"workspace", "tmp", "home"}
 
 
 @pytest.mark.asyncio

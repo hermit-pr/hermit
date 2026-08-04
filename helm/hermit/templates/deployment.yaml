@@ -27,6 +27,12 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -62,12 +68,12 @@ spec:
                   name: {{ .Values.secrets.vllmApiKey.name | quote }}
                   key: {{ .Values.secrets.vllmApiKey.key | required "secrets.vllmApiKey.key is required" | quote }}
             {{- end }}
-            {{- if .Values.secrets.reportSigningKey.name }}
-            - name: HERMIT_REPORT_SIGNING_KEY
+            {{- if .Values.secrets.jobIdSigningKey.name }}
+            - name: HERMIT_JOB_ID_SIGNING_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.reportSigningKey.name | quote }}
-                  key: {{ .Values.secrets.reportSigningKey.key | required "secrets.reportSigningKey.key is required" | quote }}
+                  name: {{ .Values.secrets.jobIdSigningKey.name | quote }}
+                  key: {{ .Values.secrets.jobIdSigningKey.key | required "secrets.jobIdSigningKey.key is required" | quote }}
             {{- end }}
           livenessProbe:
             httpGet:

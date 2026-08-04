@@ -60,11 +60,22 @@ class Settings(_SettingsBase):
     git_read_token: SecretStr
 
     webhook_secret: SecretStr = Field(..., min_length=16)
-    report_signing_key: SecretStr | None = None
+    job_id_signing_key: SecretStr | None = None
     vllm_endpoint: str = Field(..., description="URL of the vLLM inference endpoint")
     model: str = Field(..., description="Model served by the vLLM endpoint")
     review_rules: str = DEFAULT_REVIEW_RULES
     vllm_api_key: SecretStr | None = None
+    policy_file_path: str = "AGENTS.md"
+
+    rate_limit_per_ip: int = 60
+    rate_limit_global: int = 600
+    rate_limit_window_seconds: int = 60
+    max_body_bytes: int = 10 * 1024 * 1024
+
+    pod_cpu_request: str = "200m"
+    pod_memory_request: str = "512Mi"
+    pod_cpu_limit: str = "1"
+    pod_memory_limit: str = "2Gi"
 
     opencode_bin: str = "opencode"
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
@@ -97,6 +108,7 @@ class SlaveSettings(_SettingsBase):
     git_host_url: str = "https://github.com"
     git_read_token: SecretStr
     repo: str
+    ref: str = ""
     source_repo: str = ""
     head_sha: str = ""
     head_ref: str = ""
@@ -106,6 +118,7 @@ class SlaveSettings(_SettingsBase):
     model: str
     review_rules: str = DEFAULT_REVIEW_RULES
     vllm_api_key: SecretStr | None = None
+    policy_file_path: str = "AGENTS.md"
     opencode_bin: str = "opencode"
     opencode_args: List[str] = Field(default_factory=lambda: ["run"])
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"

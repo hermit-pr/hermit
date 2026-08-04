@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
+BASE_TAG = "base-sha"
+
 
 def _run(args: list[str], env: dict[str, str] | None = None) -> str:
     """Run a git command and return its stdout.
@@ -94,29 +96,107 @@ def clone_and_diff(
     head_source_url: str = "",
     env: dict[str, str] | None = None,
 ) -> str:
-    """Clone a repository and diff the base against the head.
+    """Clone a repository and diff the exact base against the head.
+
+    The repository is initialised empty and two shallow, depth-1 fetches pull
+    the exact base commit and the head commit. The base commit is tagged
+    ``base-sha`` so ``git diff base-sha`` always reflects the precise PR diff
+    even if the target branch moved after the webhook fired.
 
     ``pr_number`` (GitHub) makes the head fetch use ``refs/pull/<n>/head`` so
     that pull requests from forks are supported. ``head_source_url`` (GitLab)
     makes the head fetch come from the fork project for cross-project merge
-    requests. The head/base SHAs take precedence over branch names when both
-    objects are available locally.
+    requests. Exact SHAs take priority over branch names.
     """
-    clone_repository(source_url, repo_dir, env)
+    directory = Path(repo_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    _run(["git", "init", "-q", str(directory)], env=env)
+    _run(["git", "-C", str(directory), "remote", "add", "origin", source_url], env=env)
+    base = base_sha or f"refs/heads/{base_ref}"
+    _run(
+        ["git", "-C", str(directory), "fetch", "--depth", "1", "origin", base],
+        env=env,
+    )
     if provider == "github" and pr_number:
-        fetch_refs(repo_dir, [base_ref], env)
         _run(
-            ["git", "-C", repo_dir, "fetch", "origin", f"refs/pull/{pr_number}/head"],
+            [
+                "git",
+                "-C",
+                str(directory),
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                f"refs/pull/{pr_number}/head",
+            ],
             env=env,
         )
-        head = head_sha or "FETCH_HEAD"
     elif head_source_url and head_source_url != source_url:
-        fetch_refs(repo_dir, [base_ref], env)
-        _run(["git", "-C", repo_dir, "remote", "add", "head-source", head_source_url])
-        _run(["git", "-C", repo_dir, "fetch", "head-source", head_ref], env=env)
-        head = head_sha or "FETCH_HEAD"
+        _run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "remote",
+                "add",
+                "head-source",
+                head_source_url,
+            ]
+        )
+        _run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "fetch",
+                "--depth",
+                "1",
+                "head-source",
+                head_sha or f"refs/heads/{head_ref}",
+            ],
+            env=env,
+        )
     else:
-        fetch_refs(repo_dir, [base_ref, head_ref], env)
-        head = head_sha or f"origin/{head_ref}"
-    base = base_sha or f"origin/{base_ref}"
-    return diff_between(repo_dir, base, head)
+        _run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                head_sha or f"refs/heads/{head_ref}",
+            ],
+            env=env,
+        )
+    _run(["git", "-C", str(directory), "checkout", "-q", "FETCH_HEAD"], env=env)
+    base_object = base_sha or f"refs/remotes/origin/{base_ref}"
+    _run(["git", "-C", str(directory), "tag", "-f", BASE_TAG, base_object], env=env)
+    return _run(["git", "-C", str(directory), "diff", "--no-color", BASE_TAG], env=env)
+
+
+def extract_policy(
+    repo_dir: str, base: str, destination: str, policy_file: str = "AGENTS.md"
+) -> bool:
+    """Extract ``policy_file`` from ``base`` into ``destination``.
+
+    Returns:
+        True when the policy file exists at the base commit and was written.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo_dir,
+            "show",
+            f"{base}:{policy_file}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    Path(destination).write_text(result.stdout, encoding="utf-8")
+    return True

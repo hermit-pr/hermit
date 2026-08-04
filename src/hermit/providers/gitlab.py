@@ -30,7 +30,7 @@ class GitLabClient(GitClient):
         project = self._project(event.repo)
         path = f"/projects/{project}/merge_requests/{event.ref}/notes"
         logger.info("posting review on %s %s/%s", self.endpoint, event.repo, event.ref)
-        response = await self._http.post(path, json={"body": body})
+        response = await self._request("POST", path, json={"body": body})
         response.raise_for_status()
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
@@ -38,7 +38,7 @@ class GitLabClient(GitClient):
         project = self._project(event.repo)
         path = f"/projects/{project}/merge_requests/{event.ref}"
         logger.debug("resolving refs for %s/%s", event.repo, event.ref)
-        response = await self._http.get(path)
+        response = await self._request("GET", path)
         response.raise_for_status()
         merge_request = response.json()
         diff_refs = merge_request.get("diff_refs") or {}
@@ -47,7 +47,7 @@ class GitLabClient(GitClient):
             action=event.action,
             repo=event.repo,
             ref=event.ref,
-            head_sha=merge_request.get("sha", ""),
+            head_sha=diff_refs.get("head_sha") or merge_request.get("sha", ""),
             head_ref=merge_request.get("source_branch", ""),
             base_sha=diff_refs.get("base_sha", ""),
             base_ref=merge_request.get("target_branch", ""),

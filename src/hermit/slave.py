@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import signal
 import sys
 
 from hermit.config import SlaveSettings
@@ -10,11 +11,13 @@ from hermit.git import (
     askpass_env,
     authenticated_url,
     clone_and_diff,
+    extract_policy,
     write_askpass,
 )
 from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
-from hermit.report import report_review
+from hermit.report import report_failure, report_review
+from hermit.secretscan import scan_for_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +49,8 @@ async def run_review(settings: SlaveSettings) -> str:
         if settings.source_repo
         else ""
     )
-    diff = clone_and_diff(
+    diff = await asyncio.to_thread(
+        clone_and_diff,
         settings.git_provider,
         source,
         repo_dir,
@@ -61,12 +65,23 @@ async def run_review(settings: SlaveSettings) -> str:
     if not diff.strip():
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
+    policy_path = os.path.join(workspace, "policy.md")
+    await asyncio.to_thread(
+        extract_policy,
+        repo_dir,
+        settings.base_sha,
+        policy_path,
+        settings.policy_file_path,
+    )
+    logger.info("extracting policy file %s", settings.policy_file_path)
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
         settings.head_ref,
         settings.review_rules,
         diff,
+        secret_candidates=scan_for_secrets(diff),
+        policy_file=settings.policy_file_path,
     )
     runner = OpenCodeRunner(
         settings.opencode_bin,
@@ -74,7 +89,10 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.vllm_endpoint,
         settings.model,
         workspace,
-        settings.vllm_api_key.get_secret_value() if settings.vllm_api_key else None,
+        api_key=(
+            settings.vllm_api_key.get_secret_value() if settings.vllm_api_key else None
+        ),
+        extra_env={"PROJECT_POLICY_FILE": policy_path},
     )
     logger.info(
         "invoking opencode against vLLM endpoint (model=%s)",
@@ -82,7 +100,7 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
-    report_review(
+    await report_review(
         settings.master_url,
         settings.job_id,
         settings.report_secret.get_secret_value(),
@@ -91,9 +109,27 @@ async def run_review(settings: SlaveSettings) -> str:
     return output
 
 
+def _handle_signal(signum: int, _frame: object) -> None:
+    """Report a failure to the master before exiting on SIGTERM/SIGINT."""
+    logger.warning("received signal %d, reporting failure", signum)
+    try:
+        settings = SlaveSettings()
+        report_failure(
+            settings.master_url,
+            settings.job_id,
+            settings.report_secret.get_secret_value(),
+            f"terminated by signal {signum}",
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.debug("could not report failure from signal handler")
+    sys.exit(1)
+
+
 def main() -> None:
     """Run a single review and exit with a status code."""
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
     try:
         asyncio.run(run_review(SlaveSettings()))
     except Exception:  # pylint: disable=broad-exception-caught

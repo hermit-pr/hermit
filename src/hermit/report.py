@@ -8,22 +8,50 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-def report_review(
+async def report_review(
     master_url: str,
     job_id: str,
     report_secret: str,
     body: str,
-    http: Optional[httpx.Client] = None,
+    http: Optional[httpx.AsyncClient] = None,
 ) -> None:
     """POST the review ``body`` to the master's internal report endpoint."""
     url = f"{master_url.rstrip('/')}/internal/report/{job_id}"
     headers = {"X-Hermit-Report-Secret": report_secret}
     logger.info("posting review report to %s", url)
-    client = http or httpx.Client()
+    client = http or httpx.AsyncClient()
     try:
-        response = client.post(url, json={"body": body}, headers=headers, timeout=120.0)
+        response = await client.post(
+            url, json={"body": body}, headers=headers, timeout=120.0
+        )
         logger.debug("report POST returned status %d", response.status_code)
         response.raise_for_status()
     finally:
         if http is None:
-            client.close()
+            await client.aclose()
+
+
+def report_failure(
+    master_url: str,
+    job_id: str,
+    report_secret: str,
+    error: str,
+) -> None:
+    """Best-effort, synchronous failure report for use in signal handlers.
+
+    Runs in the main thread of a terminating process, so it uses a plain
+    ``httpx.Client`` and swallows all errors.
+    """
+    url = f"{master_url.rstrip('/')}/internal/report/{job_id}"
+    headers = {"X-Hermit-Report-Secret": report_secret}
+    try:
+        with httpx.Client() as client:
+            response = client.post(
+                url,
+                json={"body": f"Review failed: {error}"},
+                headers=headers,
+                timeout=30.0,
+            )
+            logger.debug("failure report returned status %d", response.status_code)
+    except httpx.HTTPError:
+        logger.debug("could not report failure for job %s", job_id)

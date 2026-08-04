@@ -21,6 +21,11 @@ data:
   HERMIT_REPORT_TIMEOUT_SECONDS: {{ .Values.config.reportTimeoutSeconds | quote }}
   HERMIT_OPCODE_INIT_IMAGE: {{ .Values.config.opencodeInitImage | quote }}
   HERMIT_OPCODE_INIT_BIN_PATH: {{ .Values.config.opencodeInitBinPath | quote }}
+  HERMIT_POLICY_FILE_PATH: {{ .Values.config.policyFilePath | quote }}
+  HERMIT_POD_CPU_REQUEST: {{ .Values.config.podResources.requests.cpu | quote }}
+  HERMIT_POD_MEMORY_REQUEST: {{ .Values.config.podResources.requests.memory | quote }}
+  HERMIT_POD_CPU_LIMIT: {{ .Values.config.podResources.limits.cpu | quote }}
+  HERMIT_POD_MEMORY_LIMIT: {{ .Values.config.podResources.limits.memory | quote }}
   {{- if .Values.config.opencodeArgs }}
   HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
   {{- end }}

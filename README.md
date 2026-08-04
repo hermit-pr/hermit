@@ -73,11 +73,12 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_GITLAB_TOKEN` | for GitLab | write token used to post reviews |
 | `HERMIT_GIT_READ_TOKEN` | yes | read-only token handed to reviewer pods for cloning |
 | `HERMIT_WEBHOOK_SECRET` | yes | secret used to validate inbound webhooks |
-| `HERMIT_REPORT_SIGNING_KEY` | no | key used to derive deterministic, horizontally-shared job ids (defaults to the webhook secret) |
+| `HERMIT_JOB_ID_SIGNING_KEY` | no | key used to derive deterministic, horizontally-shared job ids (defaults to the webhook secret) |
 | `HERMIT_VLLM_ENDPOINT` | yes | URL of the dedicated vLLM inference endpoint |
 | `HERMIT_MODEL` | yes | name of the model served by the vLLM endpoint |
 | `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | instructions that shape the review behavior |
+| `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | path to the opencode binary (default `opencode`) |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode arguments (default `run`) |
 | `HERMIT_OPCODE_INIT_IMAGE` | no | init container image providing opencode binary (default `ghcr.io/anomalyco/opencode:latest`; empty to disable) |
@@ -88,6 +89,12 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_POD_NAMESPACE` | no | namespace for pods/secrets (default: in-cluster namespace) |
 | `HERMIT_POD_SERVICE_ACCOUNT` | no | ServiceAccount for reviewer pods |
 | `HERMIT_REPORT_TIMEOUT_SECONDS` | no | max wait for a review before failing the job (default 1800) |
+| `HERMIT_RATE_LIMIT_PER_IP` | no | max requests per source IP per window (default 60) |
+| `HERMIT_RATE_LIMIT_GLOBAL` | no | max requests overall per window (default 600) |
+| `HERMIT_RATE_LIMIT_WINDOW_SECONDS` | no | sliding window for rate limiting (default 60) |
+| `HERMIT_MAX_BODY_BYTES` | no | max webhook/report body size (default 10 MiB) |
+| `HERMIT_POD_CPU_REQUEST`, `HERMIT_POD_MEMORY_REQUEST` | no | reviewer pod resource requests (default `200m` / `512Mi`) |
+| `HERMIT_POD_CPU_LIMIT`, `HERMIT_POD_MEMORY_LIMIT` | no | reviewer pod resource limits (default `1` / `2Gi`) |
 | `HERMIT_POD_SPAWNER` | no | `k8s` (default) or `fake` for local development/tests |
 | `HERMIT_KUBE_CONFIG` | no | path to a kubeconfig (outside the cluster only) |
 | `HERMIT_HOST` | no | bind address (default `0.0.0.0`) |
@@ -112,6 +119,7 @@ The master fills these from the originating change event; the pod only reads the
 | `HERMIT_SOURCE_REPO` | source (fork) project path for cross-project GitLab MRs |
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode configuration |
 | `HERMIT_VLLM_API_KEY` | optional API key forwarded to the vLLM endpoint (from the job Secret) |
+| `HERMIT_POLICY_FILE_PATH` | project policy file to extract from the base commit |
 | `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
 | `HERMIT_MASTER_URL` | where to report the review |
@@ -133,6 +141,12 @@ docker build -f docker/Dockerfile -t hermit .
 
 Push it to your private registry and set `image.repository` and `image.tag` in the Helm values accordingly.
 
+The image does not bundle the opencode binary by default; reviewer pods get it from the init container. For local development you can install opencode into the image:
+
+```sh
+docker build -f docker/Dockerfile --build-arg INSTALL_OPENCODE=true -t hermit .
+```
+
 ### 2. Provide the secrets
 
 The chart never stores tokens. Create Kubernetes Secrets for them in the same namespace (or reuse existing ones) and reference each by name and key:
@@ -143,7 +157,7 @@ The chart never stores tokens. Create Kubernetes Secrets for them in the same na
 | `secrets.gitRWToken` | read/write token the master uses to post reviews | `git-rw` / `token` |
 | `secrets.webhookSecret` | secret validating inbound webhooks | `webhook` / `token` |
 | `secrets.vllmApiKey` | optional API key forwarded to your vLLM endpoint | `vllm` / `token` |
-| `secrets.reportSigningKey` | optional key deriving horizontal job ids | `report-signing` / `token` |
+| `secrets.jobIdSigningKey` | optional key deriving horizontal job ids | `report-signing` / `token` |
 
 ```sh
 kubectl create secret generic git-read  --from-literal=token=read-only-token
@@ -171,15 +185,15 @@ helm install hermit helm/hermit \
   --set secrets.webhookSecret.key=token \
   --set secrets.vllmApiKey.name=vllm \
   --set secrets.vllmApiKey.key=token \
-  --set secrets.reportSigningKey.name=report-signing \
-  --set secrets.reportSigningKey.key=token
+  --set secrets.jobIdSigningKey.name=report-signing \
+  --set secrets.jobIdSigningKey.key=token
 ```
 
 > **Horizontal scaling:** the master keeps its durable job state in Kubernetes (the
 > per-job Secret), so you can raise `replicaCount` and restart the deployment
 > freely. Duplicated webhook events are collapsed onto one job via a
 > deterministic job id, and a background sweep reclaims orphaned reviewer pods
-> and secrets. Set `HERMIT_REPORT_SIGNING_KEY` (values: `secrets.reportSigningKey`)
+> and secrets. Set `HERMIT_JOB_ID_SIGNING_KEY` (values: `secrets.jobIdSigningKey`)
 > to the same value on all replicas so they agree on job ids.
 
 To use the init container for providing the opencode binary (recommended for airgapped environments), the defaults work out of the box. To use a private registry mirror, override:

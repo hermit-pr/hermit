@@ -137,7 +137,7 @@ async def test_gitlab_resolve_refs_fills_head_and_base() -> None:
                 "sha": "aaa111",
                 "source_branch": "feature/x",
                 "target_branch": "main",
-                "diff_refs": {"base_sha": "bbb222"},
+                "diff_refs": {"base_sha": "bbb222", "head_sha": "ccc333"},
             },
         )
 
@@ -147,6 +147,98 @@ async def test_gitlab_resolve_refs_fills_head_and_base() -> None:
     finally:
         await client.aclose()
     assert event.head_ref == "feature/x"
-    assert event.head_sha == "aaa111"
+    assert event.head_sha == "ccc333"
     assert event.base_ref == "main"
     assert event.base_sha == "bbb222"
+
+
+@pytest.mark.asyncio
+async def test_gitlab_resolve_refs_head_sha_falls_back_to_merge_result() -> None:
+    """Without diff_refs.head_sha the merge result sha is used."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "sha": "aaa111",
+                "source_branch": "feature/x",
+                "target_branch": "main",
+                "diff_refs": {"base_sha": "bbb222"},
+            },
+        )
+
+    client = GitLabClient("https://git.example", "token123", http=_http(handler))
+    try:
+        event = await client.resolve_refs(_gitlab_event())
+    finally:
+        await client.aclose()
+    assert event.head_sha == "aaa111"
+
+
+@pytest.mark.asyncio
+async def test_github_client_retries_transient_errors() -> None:
+    """A 5xx is retried before the failure is surfaced."""
+    calls = {"count": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            return httpx.Response(500, json={"message": "boom"})
+        return httpx.Response(200, json={})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        event = await client.resolve_refs(_github_event())
+    finally:
+        await client.aclose()
+    assert calls["count"] == 3
+    assert event.head_ref == ""
+
+
+@pytest.mark.asyncio
+async def test_github_client_does_not_retry_4xx() -> None:
+    """A 4xx response is returned without retries."""
+    calls = {"count": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(403, json={"message": "forbidden"})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.resolve_refs(_github_event())
+    finally:
+        await client.aclose()
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_github_check_membership_accepts_member() -> None:
+    """A 200 on the membership endpoint means the user is a member."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/orgs/acme/members/alice"
+        return httpx.Response(204, json={})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        member = await client.check_membership("acme", "alice")
+    finally:
+        await client.aclose()
+    assert member is True
+
+
+@pytest.mark.asyncio
+async def test_github_check_membership_rejects_non_member() -> None:
+    """A 404 on the membership endpoint means the user is not a member."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "not found"})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        member = await client.check_membership("acme", "mallory")
+    finally:
+        await client.aclose()
+    assert member is False

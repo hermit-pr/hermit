@@ -41,6 +41,14 @@ class FakeClient(GitClient):
         """Close the fake client."""
 
 
+class NoMembershipClient(FakeClient):
+    """Fake client that rejects every membership check."""
+
+    async def check_membership(self, _org: str, _username: str) -> bool:
+        """Reject every commenter."""
+        return False
+
+
 def _settings(**overrides) -> Settings:
     """Build settings with a small report timeout for tests."""
     values = {"report_timeout_seconds": 1, "pod_spawner": "fake"}
@@ -219,7 +227,10 @@ async def test_github_comment_trigger_spawns_pod() -> None:
             "pull_request": {},
             "html_url": "https://github.example/acme/app/pull/7",
         },
-        "comment": {"body": "please @hermit review this"},
+        "comment": {
+            "body": "please @hermit review this",
+            "user": {"login": "alice"},
+        },
         "repository": {"full_name": "acme/app"},
     }
     async with _client(app) as http:
@@ -430,4 +441,91 @@ async def test_job_times_out_without_report() -> None:
     assert job.status == "failed"
     assert job.error == "review report timed out"
     assert spawner.cleaned == [job.id]
+    assert not store.all()
+
+
+async def test_github_ping_event_returns_ok() -> None:
+    """GitHub ping events are acknowledged without spawning anything."""
+    store = JobStore()
+    app = create_app(_settings(), FakeClient(), FakePodSpawner(), store)
+    async with _client(app) as http:
+        response = await http.post(
+            "/webhook/github",
+            content=b"{}",
+            headers={"X-GitHub-Event": "ping"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert not store.all()
+
+
+async def test_webhook_rate_limit_returns_429() -> None:
+    """Exceeding the per-IP limit rejects further requests."""
+    store = JobStore()
+    app = create_app(
+        _settings(rate_limit_per_ip=2), FakeClient(), FakePodSpawner(), store
+    )
+    payload = _github_pr_payload()
+    signed = _github_signature(json.dumps(payload).encode())
+    async with _client(app) as http:
+        first = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={"X-Hub-Signature-256": signed},
+        )
+        second = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={"X-Hub-Signature-256": signed},
+        )
+        third = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={"X-Hub-Signature-256": signed},
+        )
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert third.status_code == 429
+
+
+async def test_report_rejects_invalid_secret_before_reading_body() -> None:
+    """An unauthenticated report is rejected before the body is parsed."""
+    store = JobStore()
+    app = create_app(_settings(), FakeClient(), FakePodSpawner(), store)
+    job = await store.create(_github_event())
+    async with _client(app) as http:
+        response = await http.post(
+            f"/internal/report/{job.id}",
+            content=b"this is not json {",
+            headers={"X-Hermit-Report-Secret": "wrong"},
+        )
+    assert response.status_code == 401
+
+
+async def test_github_comment_from_non_member_is_rejected() -> None:
+    """A comment from a user outside the org does not trigger a review."""
+    store = JobStore()
+    app = create_app(_settings(), NoMembershipClient(), FakePodSpawner(), store)
+    payload = {
+        "action": "created",
+        "issue": {
+            "number": 7,
+            "pull_request": {},
+            "html_url": "https://github.example/acme/app/pull/7",
+        },
+        "comment": {
+            "body": "please @hermit review",
+            "user": {"login": "mallory"},
+        },
+        "repository": {"full_name": "acme/app"},
+    }
+    async with _client(app) as http:
+        response = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={
+                "X-Hub-Signature-256": _github_signature(json.dumps(payload).encode())
+            },
+        )
+    assert response.status_code == 403
     assert not store.all()

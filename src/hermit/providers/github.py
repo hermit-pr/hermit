@@ -27,14 +27,14 @@ class GitHubClient(GitClient):
         path = f"/repos/{event.repo}/pulls/{event.ref}/reviews"
         payload = {"body": body, "event": "COMMENT", "commit_id": event.head_sha}
         logger.info("posting review on %s %s/%s", self.endpoint, event.repo, event.ref)
-        response = await self._http.post(path, json=payload)
+        response = await self._request("POST", path, json=payload)
         response.raise_for_status()
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fetch the pull request to fill in the head/base refs."""
         path = f"/repos/{event.repo}/pulls/{event.ref}"
         logger.debug("resolving refs for %s/%s", event.repo, event.ref)
-        response = await self._http.get(path)
+        response = await self._request("GET", path)
         response.raise_for_status()
         pull = response.json()
         head = pull.get("head") or {}
@@ -52,3 +52,12 @@ class GitHubClient(GitClient):
             url=pull.get("html_url", ""),
             project_id=event.project_id,
         )
+
+    async def check_membership(self, org: str, username: str) -> bool:
+        """Return True when ``username`` is a member of ``org``."""
+        path = f"/orgs/{org}/members/{username}"
+        response = await self._request("GET", path)
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return True

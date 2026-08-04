@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import hmac
 import secrets
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -49,9 +50,11 @@ class ReviewJob:
 class JobStore:
     """Holds the in-flight review jobs of a single master instance."""
 
-    def __init__(self, signing_key: str = "") -> None:
+    def __init__(self, signing_key: str = "", ttl_seconds: int = 3600) -> None:
         self._jobs: dict[str, ReviewJob] = {}
         self._signing_key = signing_key
+        self._created: dict[str, float] = {}
+        self.ttl_seconds = ttl_seconds
 
     async def create(self, event: ChangeEvent) -> ReviewJob:
         """Create and record a job for ``event``."""
@@ -61,6 +64,7 @@ class JobStore:
             report_secret=secrets.token_urlsafe(32),
         )
         self._jobs[job.id] = job
+        self._created[job.id] = time.monotonic()
         return job
 
     async def get(self, job_id: str) -> Optional[ReviewJob]:
@@ -70,6 +74,17 @@ class JobStore:
     async def remove(self, job_id: str) -> None:
         """Drop the job with ``job_id`` from the store."""
         self._jobs.pop(job_id, None)
+        self._created.pop(job_id, None)
+
+    def evict(self) -> None:
+        """Drop jobs that have outlived the TTL without being cleaned up."""
+        cutoff = time.monotonic() - self.ttl_seconds
+        stale = [
+            job_id for job_id, created in self._created.items() if created < cutoff
+        ]
+        for job_id in stale:
+            self._jobs.pop(job_id, None)
+            self._created.pop(job_id, None)
 
     def all(self) -> list[ReviewJob]:
         """Return a snapshot of all in-flight jobs."""

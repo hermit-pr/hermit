@@ -1,5 +1,9 @@
 FROM python:3.13-slim AS base
 
+# Install the opencode binary into the image for local dev only. The
+# production path is the init-container pattern, so this stays off by default.
+ARG INSTALL_OPENCODE=false
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -9,6 +13,10 @@ RUN groupadd --system hermit \
     && useradd --system --gid hermit --home-dir /app hermit \
     && apt-get update \
     && apt-get install -y --no-install-recommends git \
+    && if [ "$INSTALL_OPENCODE" = "true" ]; then \
+         apt-get install -y --no-install-recommends nodejs npm \
+         && npm install -g opencode-ai; \
+       fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

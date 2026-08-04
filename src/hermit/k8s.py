@@ -52,6 +52,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_VLLM_ENDPOINT": settings.vllm_endpoint,
         "HERMIT_MODEL": settings.model,
         "HERMIT_REVIEW_RULES": settings.review_rules,
+        "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
         "HERMIT_OPCODE_BIN": opencode_bin,
         "HERMIT_OPCODE_ARGS": " ".join(settings.opencode_args),
         "HERMIT_WORKSPACE": settings.workspace,
@@ -311,13 +312,44 @@ class K8sPodSpawner(PodSpawner):
         """Build the reviewer pod specification."""
         import kubernetes  # pylint: disable=import-outside-toplevel
 
+        s = self._settings
+        container_volumes = [
+            kubernetes.client.V1VolumeMount(name="workspace", mount_path=s.workspace),
+            kubernetes.client.V1VolumeMount(name="tmp", mount_path="/tmp"),
+            kubernetes.client.V1VolumeMount(name="home", mount_path="/home/hermit"),
+        ]
+        pod_volumes = list(volumes) + [
+            kubernetes.client.V1Volume(
+                name="workspace",
+                empty_dir=kubernetes.client.V1EmptyDirVolumeSource(),
+            ),
+            kubernetes.client.V1Volume(
+                name="tmp",
+                empty_dir=kubernetes.client.V1EmptyDirVolumeSource(),
+            ),
+            kubernetes.client.V1Volume(
+                name="home",
+                empty_dir=kubernetes.client.V1EmptyDirVolumeSource(),
+            ),
+        ]
         container = kubernetes.client.V1Container(
             name="reviewer",
-            image=self._settings.pod_image,
+            image=s.pod_image,
             command=["python", "-m", "hermit.slave"],
             env=env_vars,
-            volume_mounts=volume_mounts,
-            security_context=kubernetes.client.V1SecurityContext(run_as_non_root=True),
+            volume_mounts=volume_mounts + container_volumes,
+            security_context=kubernetes.client.V1SecurityContext(
+                run_as_non_root=True,
+                run_as_user=1000,
+                run_as_group=1000,
+                read_only_root_filesystem=True,
+                allow_privilege_escalation=False,
+                capabilities=kubernetes.client.V1Capabilities(drop=["ALL"]),
+            ),
+            resources=kubernetes.client.V1ResourceRequirements(
+                requests={"cpu": s.pod_cpu_request, "memory": s.pod_memory_request},
+                limits={"cpu": s.pod_cpu_limit, "memory": s.pod_memory_limit},
+            ),
         )
         return kubernetes.client.V1Pod(
             metadata=kubernetes.client.V1ObjectMeta(
@@ -333,10 +365,19 @@ class K8sPodSpawner(PodSpawner):
                 restart_policy="Never",
                 init_containers=init_containers,
                 containers=[container],
-                volumes=volumes,
-                service_account_name=self._settings.pod_service_account or None,
+                volumes=pod_volumes,
+                security_context=kubernetes.client.V1PodSecurityContext(
+                    run_as_non_root=True,
+                    run_as_user=1000,
+                    run_as_group=1000,
+                    fs_group=1000,
+                    seccomp_profile=kubernetes.client.V1SeccompProfile(
+                        type="RuntimeDefault"
+                    ),
+                ),
+                service_account_name=s.pod_service_account or None,
                 automount_service_account_token=False,
-                active_deadline_seconds=self._settings.report_timeout_seconds + 60,
+                active_deadline_seconds=s.report_timeout_seconds + 60,
             ),
         )
 

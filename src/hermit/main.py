@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 def _resolve_signing_key(settings: Settings) -> str:
     """Pick the key used to derive deterministic, cross-replica job ids."""
-    if settings.report_signing_key:
-        return settings.report_signing_key.get_secret_value()
+    if settings.job_id_signing_key:
+        return settings.job_id_signing_key.get_secret_value()
     return settings.webhook_secret.get_secret_value()
 
 
@@ -33,7 +33,10 @@ def run() -> None:
     )
     client = build_git_client(settings)
     spawner = build_spawner(settings)
-    store = JobStore(_resolve_signing_key(settings))
+    store = JobStore(
+        _resolve_signing_key(settings),
+        ttl_seconds=settings.report_timeout_seconds * 2,
+    )
     app = create_app(settings, client, spawner, store)
     uvicorn.run(
         app, host=settings.host, port=settings.port, log_level=settings.log_level

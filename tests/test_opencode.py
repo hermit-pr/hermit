@@ -4,7 +4,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from hermit.opencode import OpenCodeRunner
+import pytest
+
+from hermit.opencode import OpenCodeRunner, extract_text
 
 
 def _run(opencode_opts: dict) -> dict:
@@ -77,3 +79,62 @@ def test_opencode_environment_omits_api_key_when_absent() -> None:
         )
         env = runner._environment()  # pylint: disable=protected-access
         assert "VLLM_API_KEY" not in env
+
+
+def test_opencode_config_includes_permission_block() -> None:
+    """The generated config forbids mutating shell commands."""
+    config = _run({})
+    permission = config["permission"]
+    assert "*git push*" in permission["deny"]
+    assert "*git commit*" in permission["deny"]
+    assert "*git tag*" in permission["deny"]
+    assert "*write*" in permission["deny"]
+    assert "git diff*" in permission["allow"]
+    assert "git log*" in permission["allow"]
+    assert "read" in permission["allow"]
+
+
+def test_opencode_environment_pins_config_for_antismuggling() -> None:
+    """OPENCODE_CONFIG points at the workspace config so repo config is ignored."""
+    with tempfile.TemporaryDirectory() as tmp:
+        runner = OpenCodeRunner(
+            bin_path="opencode",
+            args=["run"],
+            endpoint="http://vllm.example:8000/v1",
+            model="llama-3.1-8b-instruct",
+            workspace=tmp,
+        )
+        env = runner._environment()  # pylint: disable=protected-access
+        assert env["OPENCODE_CONFIG"] == str(Path(tmp) / "opencode.json")
+        assert env["OPENCODE_CONFIG_DIR"] == tmp
+
+
+def test_extract_text_accumulates_fragments_by_message() -> None:
+    """NDJSON text fragments of the last message are concatenated."""
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "message", "messageID": "m1"}),
+            json.dumps({"part": {"type": "text", "text": "Hello "}}),
+            json.dumps({"part": {"type": "text", "text": "world"}}),
+            json.dumps({"part": {"type": "tool", "tool": "bash"}}),
+            json.dumps({"messageID": "m2", "part": {"type": "text", "text": "Final"}}),
+            json.dumps(
+                {"messageID": "m2", "part": {"type": "text", "text": " review"}}
+            ),
+        ]
+    )
+    assert extract_text(stdout) == "Final review"
+
+
+def test_extract_text_raises_on_error_event() -> None:
+    """An error event makes the parser fail loudly."""
+    stdout = json.dumps({"type": "error", "error": "model timed out"})
+    with pytest.raises(RuntimeError, match="error event"):
+        extract_text(stdout)
+
+
+def test_extract_text_raises_when_no_text() -> None:
+    """Output with only metadata produces a clear error."""
+    stdout = json.dumps({"type": "message", "messageID": "m1"})
+    with pytest.raises(RuntimeError, match="no text output"):
+        extract_text(stdout)

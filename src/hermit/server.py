@@ -21,6 +21,7 @@ from hermit.k8s import (
 )
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
+from hermit.ratelimit import RateLimiter
 from hermit.signing import (
     WebhookValidationError,
     validate_github_signature,
@@ -199,6 +200,16 @@ async def _sweeper(spawner: PodSpawner) -> None:
             logger.exception("sweep of reviewer pods failed")
 
 
+async def _evictor(store: JobStore) -> None:
+    """Periodically evict jobs that leaked past their TTL."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            store.evict()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("eviction of stale jobs failed")
+
+
 async def _decode_event(
     request: Request,
     provider: str,
@@ -232,6 +243,8 @@ async def _decode_event(
         event.ref,
         event.action,
     )
+    if provider == "github" and event.action == "comment":
+        await _authorize_github_commenter(request, event, client)
     if not event.head_sha:
         try:
             event = await client.resolve_refs(event)
@@ -246,6 +259,27 @@ async def _decode_event(
                 {"error": "failed to resolve refs"}, status_code=502
             )
     return event, None
+
+
+async def _authorize_github_commenter(
+    request: Request, event: ChangeEvent, client: GitClient
+) -> None:
+    """Reject an ``@hermit`` comment from a user outside the org.
+
+    Raises:
+        PermissionError: when the commenter is not a member of the org the
+            repository belongs to.
+    """
+    try:
+        payload = await request.json()
+    except Exception:  # pylint: disable=broad-exception-caught
+        payload = {}
+    commenter = (payload.get("comment") or {}).get("user") or {}
+    username = commenter.get("login", "")
+    owner = event.repo.split("/")[0] if "/" in event.repo else ""
+    if not username or not await client.check_membership(owner, username):
+        logger.warning("rejected @hermit comment from non-member %s", username)
+        raise PermissionError("commenter is not a repository member")
 
 
 async def _launch(
@@ -293,6 +327,7 @@ async def _launch(
     return JSONResponse({"status": "accepted", "job_id": job.id}, status_code=202)
 
 
+# pylint: disable=too-many-locals, too-many-statements
 def create_app(
     settings: Settings,
     client: GitClient,
@@ -302,6 +337,11 @@ def create_app(
     """Build the FastAPI application wiring the provided dependencies."""
     secret = settings.webhook_secret.get_secret_value()
     tasks: set[asyncio.Task] = set()
+    limiter = RateLimiter(
+        window=settings.rate_limit_window_seconds,
+        per_ip=settings.rate_limit_per_ip,
+        global_limit=settings.rate_limit_global,
+    )
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
@@ -318,14 +358,23 @@ def create_app(
             await spawner.sweep()
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("initial sweep failed")
-        task = asyncio.create_task(_sweeper(spawner))
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        for task in (_sweeper(spawner), _evictor(store)):
+            created = asyncio.create_task(task)
+            tasks.add(created)
+            created.add_done_callback(tasks.discard)
         yield
         await spawner.aclose()
         await client.aclose()
 
     app = FastAPI(title="H.E.R.M.I.T", version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def limit_body_size(request: Request, call_next) -> JSONResponse:
+        """Reject requests whose declared body exceeds the size limit."""
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > settings.max_body_bytes:
+            return JSONResponse({"error": "payload too large"}, status_code=413)
+        return await call_next(request)
 
     # pylint: disable=too-many-return-statements
     async def accept(
@@ -333,6 +382,9 @@ def create_app(
     ) -> JSONResponse:
         """Validate a webhook and spawn a reviewer pod for the change."""
         logger.info("received webhook request (provider=%s)", provider)
+        if not limiter.allow(request):
+            logger.warning("rate limit exceeded for %s", limiter.client_ip(request))
+            return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
         event, error = await _decode_event(request, provider, validate, client)
         if error is not None:
             return error
@@ -346,18 +398,29 @@ def create_app(
 
     @app.post("/webhook/github")
     async def github_webhook(request: Request) -> JSONResponse:
-        """Validate and accept a GitHub webhook request."""
-        return await accept(
-            request,
-            "github",
-            lambda body: validate_github_signature(
-                secret, body, request.headers.get("x-hub-signature-256")
-            ),
-        )
+        """Validate and accept a GitHub webhook request.
+
+        Ping events are acknowledged immediately without further processing.
+        """
+        if request.headers.get("x-github-event") == "ping":
+            return JSONResponse({"status": "ok"}, status_code=200)
+        try:
+            return await accept(
+                request,
+                "github",
+                lambda body: validate_github_signature(
+                    secret, body, request.headers.get("x-hub-signature-256")
+                ),
+            )
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=403)
 
     @app.post("/webhook/gitlab")
     async def gitlab_webhook(request: Request) -> JSONResponse:
         """Validate and accept a GitLab webhook request."""
+        if not limiter.allow(request):
+            logger.warning("rate limit exceeded for %s", limiter.client_ip(request))
+            return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
         return await accept(
             request,
             "gitlab",
@@ -375,6 +438,8 @@ def create_app(
         any replica can serve a report, including after a master restart. A
         ``posted`` status makes the endpoint idempotent.
         """
+        if not limiter.allow(request):
+            return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
         local = await store.get(job_id)
         job = local or await spawner.get_job(job_id)
         if job is None:

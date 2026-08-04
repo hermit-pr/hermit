@@ -14,6 +14,7 @@ from hermit.git import (
     clone_and_diff,
     clone_repository,
     diff_between,
+    extract_policy,
     fetch_refs,
 )
 from hermit.prompt import build_review_prompt
@@ -37,14 +38,30 @@ def test_build_review_prompt_includes_rules_and_diff() -> None:
     prompt = build_review_prompt(
         "github", "acme/app", "feature/x", "## Critical changes\n", "+code"
     )
-    assert "H.E.R.M.I.T, a code reviewer" in prompt
+    assert "You are H.E.R.M.I.T, a code reviewer" in prompt
+    assert "git diff base-sha" in prompt
     assert "acme/app#feature/x" in prompt
     assert "## Critical changes\n" in prompt
     assert "+code" in prompt
-    assert "single markdown comment" in prompt
+    assert "GitHub-flavored Markdown" in prompt
 
 
-def test_report_review_posts_to_master() -> None:
+def test_build_review_prompt_includes_secret_candidates() -> None:
+    """The prompt surfaces regex-detected secret candidates for audit."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "feature/x",
+        "rules",
+        "+code",
+        secret_candidates=["GitHub Token: ghp_abcdefghijklmnopqrstuvwxyz123456"],
+    )
+    assert "secret_candidates" in prompt
+    assert "GitHub Token" in prompt
+    assert "TRUE POSITIVE" in prompt
+
+
+async def test_report_review_posts_to_master() -> None:
     """The slave POSTs the review to the master report endpoint."""
     received: dict = {}
 
@@ -54,8 +71,8 @@ def test_report_review_posts_to_master() -> None:
         received["body"] = json.loads(request.content)["body"]
         return httpx.Response(200, json={})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
-        report_review(
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        await report_review(
             "http://hermit:8080",
             "job123",
             "s3cr3t",
@@ -169,6 +186,83 @@ def test_clone_and_diff_gitlab_cross_project_fork() -> None:
             head_source_url=str(fork),
         )
         assert "+head" in diff
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
+def test_clone_and_diff_base_sha_takes_priority_over_base_ref() -> None:
+    """The exact base SHA is used even when the target branch moved."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "file.txt").write_text("base\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        base_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+        _run_git(["git", "checkout", "-b", "feature"], origin)
+        (origin / "file.txt").write_text("base\nhead\n", encoding="utf-8")
+        _run_git(["git", "commit", "-am", "head"], origin)
+        head_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+        _run_git(["git", "checkout", "main"], origin)
+        (origin / "file.txt").write_text("base\nmoved\n", encoding="utf-8")
+        _run_git(["git", "commit", "-am", "target moved"], origin)
+
+        workspace = Path(tmp) / "workspace"
+        workspace.mkdir()
+        repo_dir = workspace / "repo"
+        diff = clone_and_diff(
+            "github",
+            str(origin),
+            str(repo_dir),
+            "main",
+            "feature",
+            base_sha=base_sha,
+            head_sha=head_sha,
+        )
+        assert "+head" in diff
+        assert "moved" not in diff
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
+def test_extract_policy_reads_file_from_base_commit() -> None:
+    """The policy file is extracted from the base commit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "AGENTS.md").write_text("# project rules\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        base_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+
+        destination = Path(tmp) / "policy.md"
+        got = extract_policy(str(origin), base_sha, str(destination))
+        assert got is True
+        assert destination.read_text(encoding="utf-8") == "# project rules\n"
+
+
+def test_extract_policy_returns_false_when_absent() -> None:
+    """A missing policy file is reported as not found."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "file.txt").write_text("x\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        base_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+
+        destination = Path(tmp) / "policy.md"
+        got = extract_policy(str(origin), base_sha, str(destination), "AGENTS.md")
+        assert got is False
+        assert not destination.exists()
 
 
 def _run_git(args: list[str], cwd: Path | None = None) -> str:

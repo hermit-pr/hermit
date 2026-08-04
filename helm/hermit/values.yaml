@@ -30,6 +30,8 @@ config:
   opencodeInitImage: "ghcr.io/anomalyco/opencode:latest"
   opencodeInitBinPath: "/usr/local/bin/opencode"
   workspace: /workspace
+  # Project policy file extracted from the base commit and handed to reviewers.
+  policyFilePath: AGENTS.md
   logLevel: info
   # URL reviewer pods use to report back; defaults to
   # http://<release-name>-hermit:<port>
@@ -39,6 +41,14 @@ config:
   podNamespace: ""
   podServiceAccount: hermit
   reportTimeoutSeconds: 1800
+  # Resource requests/limits for reviewer (slave) pods.
+  podResources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
 
 # Secrets are never stored in the chart or in values. Each entry references an
 # existing Kubernetes Secret in the same namespace by name and key, so real
@@ -59,7 +69,7 @@ secrets:
     key: ""
   # Optional key used to derive deterministic, horizontally-shared job ids.
   # When unset, the webhook secret is used instead.
-  reportSigningKey:
+  jobIdSigningKey:
     name: ""
     key: ""
   # Optional API key the reviewer pods forward to the vLLM endpoint.
@@ -73,6 +83,8 @@ rbac:
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 resources: {}
 nodeSelector: {}
