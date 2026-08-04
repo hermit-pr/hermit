@@ -247,6 +247,9 @@ def test_extract_policy_reads_file_from_base_commit() -> None:
         assert destination.read_text(encoding="utf-8") == "# project rules\n"
 
 
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
 def test_extract_policy_returns_false_when_absent() -> None:
     """A missing policy file is reported as not found."""
     with tempfile.TemporaryDirectory() as tmp:
