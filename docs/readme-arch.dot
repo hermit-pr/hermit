@@ -1,0 +1,52 @@
+digraph hermit {
+  rankdir=LR;
+  fontname="sans-serif";
+  fontsize=11;
+  nodesep=0.5;
+  ranksep=0.9;
+  newrank=true;
+
+  node [fontname="sans-serif", fontsize=10, shape=box, style="filled,rounded"];
+
+  /* Nodes */
+  gitlab  [label="GitLab\non-premise"     fillcolor="#fc6d26" fontcolor=white];
+  github  [label="GitHub Enterprise\non-premise" fillcolor="#2b3137" fontcolor=white];
+
+  master  [label="Master\nDeployment\n(single port)" fillcolor="#538135" fontcolor=white];
+
+  subgraph cluster_k8s {
+    label="Kubernetes (master namespace)";
+    style="filled,rounded";
+    fillcolor="#f0fff0";
+    color="#70AD47";
+
+    sa_m  [label="hermit-master\nSA (RBAC)" fillcolor="#ed7d31" fontcolor=white shape=note fontsize=9];
+    sa_r  [label="hermit-reviewer\nSA (no RBAC)" fillcolor="#f4b183" shape=note fontsize=9];
+
+    slave [label="Slave Pod\n(one per job)" fillcolor="#bf8f00" fontcolor=white];
+    secret [label="Job Secret\n(read token\n report secret\n event JSON)" fillcolor="#7030a0" fontcolor=white];
+  }
+
+  vllm [label="vLLM Endpoint\n(self-hosted)" fillcolor="#7030a0" fontcolor=white];
+
+  /* Edges */
+  github -> master [label="  webhook" color="#2b3137" penwidth=2];
+  gitlab -> master [label="  webhook" color="#fc6d26" penwidth=2];
+
+  master -> secret [label="  creates" color="#538135"];
+  master -> slave  [label="  spawns" color="#538135" penwidth=2];
+  secret -> slave  [label="  mounted" color="#7030a0"];
+
+  slave -> vllm [label="  opencode" color="#bf8f00" penwidth=2];
+
+  slave  -> master [label="  POST /internal/report/<id>" color="#bf8f00" penwidth=2];
+  master -> github [label="  review" color="#538135" penwidth=2];
+  master -> gitlab [label="  review" color="#538135" penwidth=2];
+
+  master -> sa_m [label="  runs as" style=dotted color="#ed7d31"];
+  slave  -> sa_r [label="  runs as" style=dotted color="#f4b183"];
+
+  /* Ordering */
+  { rank=same; github; gitlab; }
+  { rank=same; slave; secret; }
+}

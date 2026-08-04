@@ -1,0 +1,139 @@
+digraph hermit {
+  rankdir=TB;
+  fontname="sans-serif";
+  fontsize=12;
+  labelloc="t";
+  label="H.E.R.M.I.T Architecture";
+  compound=true;
+  nodesep=0.6;
+  ranksep=0.8;
+  newrank=true;
+
+  /* ==== Styles ==== */
+  node [fontname="sans-serif", fontsize=10, shape=box, style="filled,rounded"];
+  edge [fontname="sans-serif", fontsize=9];
+
+  /* ==== Git Host ==== */
+  subgraph cluster_git {
+    label="On-Premise Git Host";
+    style="filled,rounded";
+    fillcolor="#f0f0ff";
+    color="#4472C4";
+    penwidth=2;
+
+    gitlab   [label="GitLab"     fillcolor="#fc6d26" fontcolor=white shape=box];
+    github   [label="GitHub Enterprise" fillcolor="#2b3137" fontcolor=white shape=box];
+  }
+
+  /* ==== External ==== */
+  vllm [label="vLLM Endpoint\n(self-hosted)" fillcolor="#7030a0" fontcolor=white shape=box];
+
+  /* ==== Kubernetes Cluster ==== */
+  subgraph cluster_k8s {
+    label="Kubernetes Cluster";
+    style="filled,rounded";
+    fillcolor="#f0fff0";
+    color="#70AD47";
+    penwidth=2;
+
+    /* Master namespace */
+    subgraph cluster_master_ns {
+      label="Master Namespace";
+      style="filled,rounded";
+      fillcolor="#eaf5ea";
+      color="#70AD47";
+
+      /* Master pods */
+      subgraph cluster_master {
+        label="Master Deployment (replicas: N)";
+        style="filled,rounded";
+        fillcolor="#d5e8d4";
+
+        master1 [label="Master\nReplica 1" fillcolor="#538135" fontcolor=white];
+        master2 [label="Master\nReplica 2" fillcolor="#538135" fontcolor=white style=dashed];
+      }
+
+      /* Reviewer pods */
+      subgraph cluster_reviewers {
+        label="Reviewer Pods (one-shot)";
+        style="filled,rounded";
+        fillcolor="#fff2cc";
+
+        slave1 [label="Slave Pod\nJob abc12..." fillcolor="#bf8f00" fontcolor=white];
+        slave2 [label="Slave Pod\nJob def34..." fillcolor="#bf8f00" fontcolor=white style=dashed];
+      }
+
+      /* K8s durable state */
+      subgraph cluster_durable {
+        label="Durable Job State";
+        style="filled,rounded";
+        fillcolor="#e1d5e7";
+
+        secret1 [label="K8s Secret\nhermit-abc12..." fillcolor="#7030a0" fontcolor=white];
+        secret2 [label="K8s Secret\nhermit-def34..." fillcolor="#7030a0" fontcolor=white style=dashed];
+      }
+    }
+
+    /* SA + RBAC */
+    subgraph cluster_rbac {
+      label="RBAC";
+      style="filled,rounded";
+      fillcolor="#fce4d6";
+
+      sa_master [label="ServiceAccount\nhermit-master\n✓ pod/secret RBAC" fillcolor="#ed7d31" fontcolor=white shape=note];
+      sa_review [label="ServiceAccount\nhermit-reviewer\n(no permissions)" fillcolor="#f4b183" shape=note];
+    }
+  }
+
+  /* ==== Edges ==== */
+
+  /* Webhook flow */
+  gitlab  -> master1 [label="  webhook\n  POST /webhook/gitlab" color="#fc6d26" penwidth=2];
+  github  -> master1 [label="  webhook\n  POST /webhook/github" color="#2b3137" penwidth=2];
+
+  /* Master spawns pods + secrets */
+  master1 -> slave1  [label="  creates" color="#538135" penwidth=2];
+  master1 -> secret1 [label="  creates" color="#538135"];
+  master2 -> slave2  [label="  creates" color="#538135" style=dashed];
+  master2 -> secret2 [label="  creates" color="#538135" style=dashed];
+
+  /* Slave accesses secrets */
+  secret1 -> slave1 [label="  mounted\n  (read-token,\n   report-secret)" color="#7030a0"];
+  secret2 -> slave2 [label="  mounted" color="#7030a0" style=dashed];
+
+  /* Slave calls vLLM */
+  slave1 -> vllm [label="  opencode → vLLM\n  (model inference)" color="#7030a0" penwidth=2];
+  slave2 -> vllm [label="  inference" color="#7030a0" style=dashed];
+
+  /* Slave reports to master */
+  slave1 -> master2 [label="  POST /internal/report/abc12..." color="#bf8f00"];
+  slave2 -> master1 [label="  report" color="#bf8f00" style=dashed];
+
+  /* Master posts review */
+  master1 -> gitlab  [label="  POST review" color="#538135" penwidth=2];
+  master2 -> github  [label="  POST review" color="#538135" penwidth=2 style=dashed];
+
+  /* RBAC relationships */
+  master1 -> sa_master [label="  runs as" color="#ed7d31" style=dotted];
+  master2 -> sa_master [label="  runs as" color="#ed7d31" style=dotted];
+  slave1  -> sa_review [label="  runs as" color="#f4b183" style=dotted];
+  slave2  -> sa_review [label="  runs as" color="#f4b183" style=dotted];
+  sa_master -> sa_review [label="  creates pods\n  under its RBAC" color="#ed7d31" style=dotted penwidth=2];
+
+  /* ==== Legend ==== */
+  subgraph cluster_legend {
+    label="Key";
+    style="filled,rounded";
+    fillcolor="#f2f2f2";
+    color="#808080";
+    fontsize=9;
+
+    leg_webhook [label="1. Webhook"   shape=plaintext fontsize=9];
+    leg_spawn   [label="2. Spawn pod" shape=plaintext fontsize=9];
+    leg_review  [label="3. vLLM review" shape=plaintext fontsize=9];
+    leg_report  [label="4. Report"    shape=plaintext fontsize=9];
+    leg_post    [label="5. Post review" shape=plaintext fontsize=9];
+
+    leg_webhook -> leg_spawn -> leg_review -> leg_report -> leg_post [style=invis];
+  }
+}

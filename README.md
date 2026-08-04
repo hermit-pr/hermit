@@ -28,22 +28,9 @@ H.E.R.M.I.T has two roles running the same container image:
 | **master** | `python -m hermit.main` | long-running Deployment | receive webhooks, validate them, spawn one reviewer pod per change, collect the review, submit it to the PR/MR |
 | **slave** (reviewer pod) | `python -m hermit.slave` | one-shot Pod, one per review | clone the repository, compute the diff, run opencode against vLLM, report the review back to the master |
 
-```
-                 webhook (PR/MR events, or @hermit comment)
- GitLab / GitHub ---------------------------> master
-      ^                                          |
-      |                                          | spawns (Kubernetes API)
-      |                                          v
-      |                                    reviewer pod (slave)
-      |                                          |
-      |                                          | git clone + diff
-      |                                          | opencode -> vLLM
-      |                                          |
-      |                                          | report via /internal/report/<job_id>
-      |                                          v
-      |                                       master
-      +---------------- review posted --------------+
-```
+![Architecture diagram](docs/readme-arch.png)
+
+*Data flow: webhook → master → slave pod → vLLM → report → master → review posted.*
 
 ## How it works
 
@@ -70,7 +57,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | Variable | Required | Description |
 | --- | --- | --- |
 | `HERMIT_GIT_PROVIDER` | yes | `github` or `gitlab` |
-| `HERMIT_GIT_HOST_URL` | yes | URL of your on-premise GitLab/GitHub instance |
+| `HERMIT_GIT_HOST_URL` | yes | URL of your on-premise GitLab/GitHub instance. For **GitHub Enterprise** this must include `/api/v3` (e.g. `https://ghe.corp/api/v3`); for **self-hosted GitLab** include `/api/v4` (e.g. `https://gitlab.corp/api/v4`). Git clone operations automatically strip the API path. |
 | `HERMIT_GITHUB_TOKEN` | for GitHub | write token used to post reviews |
 | `HERMIT_GITLAB_TOKEN` | for GitLab | write token used to post reviews |
 | `HERMIT_GIT_READ_TOKEN` | yes | read-only token handed to reviewer pods for cloning |
@@ -91,10 +78,13 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_POD_NAMESPACE` | no | namespace for pods/secrets (default: in-cluster namespace) |
 | `HERMIT_POD_SERVICE_ACCOUNT` | no | ServiceAccount for reviewer pods |
 | `HERMIT_REPORT_TIMEOUT_SECONDS` | no | max wait for a review before failing the job (default 1800) |
+| `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess inside the reviewer pod (default 900) |
+| `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods a single replica may have in flight at once (default 20) |
 | `HERMIT_RATE_LIMIT_PER_IP` | no | max requests per source IP per window (default 60) |
 | `HERMIT_RATE_LIMIT_GLOBAL` | no | max requests overall per window (default 600) |
 | `HERMIT_RATE_LIMIT_WINDOW_SECONDS` | no | sliding window for rate limiting (default 60) |
-| `HERMIT_MAX_BODY_BYTES` | no | max webhook/report body size (default 10 MiB) |
+| `HERMIT_TRUST_X_FORWARDED_FOR` | no | trust `X-Forwarded-For` header for client IP (default `false`; only enable when behind a trusted reverse proxy) |
+| `HERMIT_MAX_BODY_BYTES` | no | max webhook/report body size (default 10 MiB; enforced at ASGI level for chunked encoding too) |
 | `HERMIT_POD_CPU_REQUEST`, `HERMIT_POD_MEMORY_REQUEST` | no | reviewer pod resource requests (default `200m` / `512Mi`) |
 | `HERMIT_POD_CPU_LIMIT`, `HERMIT_POD_MEMORY_LIMIT` | no | reviewer pod resource limits (default `1` / `2Gi`) |
 | `HERMIT_POD_SPAWNER` | no | `k8s` (default) or `fake` for local development/tests |
@@ -205,8 +195,8 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
 > per-job Secret), so you can raise `replicaCount` and restart the deployment
 > freely. Duplicated webhook events are collapsed onto one job via a
 > deterministic job id, and a background sweep reclaims orphaned reviewer pods
-> and secrets. Set `HERMIT_JOB_ID_SIGNING_KEY` (values: `secrets.jobIdSigningKey`)
-> to the same value on all replicas so they agree on job ids.
+> and secrets. Set the same `secrets.jobIdSigningKey` value on all replicas so
+> they agree on job ids; when unset the webhook secret is used as the default.
 
 To use the init container for providing the opencode binary (recommended for airgapped environments), the defaults work out of the box. To use a private registry mirror, override:
 
@@ -225,7 +215,12 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
   --set config.opencodeInitImage=""
 ```
 
-The chart creates the master Deployment and Service, a ServiceAccount with a Role that only allows creating/deleting reviewer pods and their Secrets, plus the ConfigMap. All tokens are injected from your existing Secrets via `secretKeyRef`; nothing sensitive is rendered into the manifests. Set `rbac.enabled` to `false` if you manage RBAC yourself.
+The chart creates the master Deployment and Service, two ServiceAccounts (a
+privileged one for the master with a Role that allows creating/deleting reviewer
+pods and their Secrets, and an unprivileged one for reviewer pods), plus the
+ConfigMap. All tokens are injected from your existing Secrets via `secretKeyRef`;
+nothing sensitive is rendered into the manifests. Set `rbac.enabled` to `false`
+if you manage RBAC yourself.
 
 #### Private CA for airgapped deployments (private PKI)
 

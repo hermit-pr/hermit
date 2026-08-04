@@ -1,5 +1,7 @@
 # H.E.R.M.I.T Architecture
 
+![H.E.R.M.I.T Architecture Diagram](architecture.png)
+
 H.E.R.M.I.T is a configurable code-review bot for **on-premise GitLab and GitHub
 instances**. It runs fully airgapped: model inference happens on a dedicated,
 self-hosted **vLLM** endpoint, and review work is executed on the operator's
@@ -190,14 +192,14 @@ reports.
 | `id` | deterministic job id: HMAC-SHA256 of the event against the shared signing key |
 | `event` | the originating `ChangeEvent` |
 | `report_secret` | one-time secret for `/internal/report/<id>` |
-| `status` | `pending` -> `reported` -> `posted` (or `failed`) |
+| `status` | `pending` -> `posted` (or `failed`) |
 | `pod_name`, `secret_name` | Kubernetes objects to clean up |
 | `body` | review text reported by the slave |
 
 ### Horizontal scaling and idempotence
 
 - **Deterministic job ids.** The job id is derived from the normalized event
-  with HMAC-SHA256 using `HERMIT_REPORT_SIGNING_KEY` (defaults to the webhook
+  with HMAC-SHA256 using `HERMIT_JOB_ID_SIGNING_KEY` (defaults to the webhook
   secret). Every replica derives the same id for the same event, so a
   duplicated webhook (or a redelivery after a master restart) cannot spawn a
   second reviewer.
@@ -211,8 +213,11 @@ reports.
   the durable Secret, so the replica that receives the callback need not be the
   one that spawned the pod.
 - **Polling watcher.** Masters do not watch the Kubernetes API for completion;
-  they poll the durable Secret/status every `WATCH_POLL_SECONDS` (5s) and rely
-  on the job being marked `posted` before cleanup.
+  they poll the durable Secret annotation and the reviewer pod phase every
+  `WATCH_POLL_SECONDS` (5s) and rely on the job being marked `posted` before
+  cleanup. Transient K8s API errors are retried with exponential backoff.
+  Pod failures (OOM, ImagePullBackOff) are detected via pod phase and
+  escalate to `failed` without waiting for the full timeout.
 - **Sweeper.** A background loop (every `SWEEP_INTERVAL_SECONDS`, 300s) deletes
   finished or timed-out reviewer pods and orphaned job Secrets, so a crashed
   master cannot leak pods or secrets.
@@ -232,18 +237,27 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_GITLAB_TOKEN` | for GitLab | write token (submits reviews) |
 | `HERMIT_GIT_READ_TOKEN` | yes | read-only token handed to reviewer pods |
 | `HERMIT_WEBHOOK_SECRET` | yes | validates inbound webhooks |
-| `HERMIT_REPORT_SIGNING_KEY` | no | derives deterministic, horizontally-shared job ids (default: webhook secret) |
+| `HERMIT_JOB_ID_SIGNING_KEY` | no | derives deterministic, horizontally-shared job ids (default: webhook secret) |
 | `HERMIT_VLLM_ENDPOINT` | yes | passed to reviewer pods |
 | `HERMIT_MODEL` | yes | passed to reviewer pods |
+| `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | passed to reviewer pods |
+| `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from base commit (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | opencode binary path inside pods |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode args |
+| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:latest`) |
+| `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess (default 900) |
+| `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods in flight per replica (default 20) |
+| `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |
 | `HERMIT_MASTER_URL` | yes | URL the pods use to reach `/internal/report` |
 | `HERMIT_POD_IMAGE` | yes | container image for reviewer pods |
 | `HERMIT_POD_NAMESPACE` | no | namespace for pods/secrets (in-cluster default) |
 | `HERMIT_POD_SERVICE_ACCOUNT` | no | ServiceAccount for reviewer pods |
 | `HERMIT_REPORT_TIMEOUT_SECONDS` | no | max wait for a review (default 1800) |
 | `HERMIT_POD_SPAWNER` | no | `k8s` (default) or `fake` (local dev/tests) |
+| `HERMIT_KUBE_CONFIG` | no | path to a kubeconfig (outside the cluster only) |
+| `HERMIT_CA_BUNDLE_PATH` | no | path to PEM CA bundle for private PKI (airgapped) |
+| `HERMIT_TRUST_X_FORWARDED_FOR` | no | trust `X-Forwarded-For` header (default `false`) |
 | `HERMIT_PORT`, `HERMIT_LOG_LEVEL`, `HERMIT_HOST` | no | HTTP server |
 
 ### Slave (set by the master on the pod)
@@ -255,7 +269,10 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_GIT_READ_TOKEN` | read-only token (from the job Secret) |
 | `HERMIT_REPO`, `HERMIT_HEAD_SHA/REF`, `HERMIT_BASE_SHA/REF` | what to diff |
 | `HERMIT_SOURCE_REPO` | source (fork) project path for cross-project GitLab MRs |
+| `HERMIT_PR_TITLE`, `HERMIT_PR_BODY` | PR/MR title and description fed to the reviewer |
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode config |
+| `HERMIT_VLLM_API_KEY` | optional API key forwarded to the vLLM endpoint (from the job Secret) |
+| `HERMIT_POLICY_FILE_PATH` | project policy file to extract from the base commit |
 | `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
 | `HERMIT_MASTER_URL` | where to report the review |
@@ -270,11 +287,13 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
   with `202`.
 - **Master pod restarts / scales** - jobs are reconstructed from the durable
   Secrets, in-flight reviews continue, and the sweeper reclaims leftovers.
-- **Pod fails to start or crashes** - the job is marked `failed`, the review is
-  not published, and leftovers (pod/secret) are cleaned up.
-- **Report timeout** - the job is marked `failed` and cleaned up.
-- **Submit failure** - the master logs the error; the pod and its Secret are
-  still cleaned up.
+- **Pod fails to start or crashes** — the watcher detects the pod `Failed` phase
+  (without waiting the full timeout), the sweeper marks the durable state
+  `failed` before cleanup, and the review is not published.
+- **Report timeout** — the job is marked `failed` and the commit status set to
+  `error`; pod and Secret are cleaned up.
+- **Submit failure** — the review was not posted; the durable state is marked
+  `failed` and the commit status set to `failure`.
 
 ## Deployment
 
@@ -283,7 +302,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
   `python -m hermit.slave`).
 - Helm chart `helm/hermit`: master Deployment (replicaCount may be raised to
   scale horizontally — the `secrets` RBAC verbs and the durable job Secrets
-  make this safe), Service, ConfigMap (non-secret config), Secret (write
-  token, read token, webhook secret, optional report signing key),
-  ServiceAccount + Role/RoleBinding for pod/secret management in the
-  namespace.
+  make this safe), Service, ConfigMap (non-secret config), two
+  ServiceAccounts (a privileged one for the master with a Role/RoleBinding
+  for pod/secret management in the namespace, and an unprivileged one for
+  reviewer pods which only needs to exist), plus optional Ingress.

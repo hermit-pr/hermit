@@ -29,7 +29,7 @@ environment before tagging `v0.1.0`.
   `refs/pull/<n>/head` or the `source_repo` remote).
 - Horizontal scaling: the master keeps durable job state in Kubernetes and
   derives **deterministic job ids** from the event (HMAC-SHA256 against
-  `HERMIT_REPORT_SIGNING_KEY`), so replicas can be scaled up and restarted
+  `HERMIT_JOB_ID_SIGNING_KEY`), so replicas can be scaled up and restarted
   freely and duplicate webhook events collapse onto one job.
 - Idempotent report handling: `/internal/report/<id>` is stateless and reads
   the durable job Secret; duplicate reports are ignored, and a review survives
@@ -49,6 +49,17 @@ environment before tagging `v0.1.0`.
 - PR title and body are passed to reviewers: `ChangeEvent` carries
   `pr_title`/`pr_body`, exported to reviewer pods as `HERMIT_PR_TITLE` /
   `HERMIT_PR_BODY`, and rendered as a neutralized `<pr_description>` section.
+- Transient K8s API errors retried with exponential backoff in the watcher.
+- Pod phase detection — reviewer pod crashes (OOM, ImagePullBackOff) detected
+  immediately via `get_pod_phase`; full timeout no longer required.
+- ASGI-level body size limiter (`_BodyLimitMiddleware`) handles chunked
+  transfer encoding in addition to Content-Length.
+- On startup, the master recovers watchers for running reviewer pods from a
+  previous replica, using the remaining timeout from the original job.
+- Reviewer pods get a separate, unprivileged ServiceAccount
+  (`hermit-reviewer`); only the master Deployment retains pod/secret RBAC.
+- Helm chart: master resource defaults (100m/128Mi requests, 500m/512Mi
+  limits), probe timing parameters, and a startup probe.
 
 ### Changed
 
@@ -63,9 +74,31 @@ environment before tagging `v0.1.0`.
   option is now optional and never replaces the internal operating prompt.
 - The PR/MR `ref` is rendered as `repo PR n` instead of a raw `#`.
 - Posted reviews are prefixed with a bot/model header.
+- The `report` endpoint performs the CAS (`mark_posted`) *before* posting the
+  review, preventing duplicate review comments from race conditions.
+- `HERMIT_GIT_HOST_URL` for GitHub Enterprise must include `/api/v3`, for
+  self-hosted GitLab `/api/v4`; the clone URL automatically strips the API path.
+- Helm `rbac.enabled: false` now correctly hides the Role and RoleBinding
+  templates.
 
 ### Fixed
 
 - GitHub `@hermit` comment authorization no longer re-reads the consumed
   request stream; it uses the already-parsed payload.
 - GitLab webhook requests are no longer double-counted against the rate limiter.
+- GitLab commit status used MR iid instead of numeric project id (silent 404).
+- Watcher crash on transient K8s API errors (re-raise of non-404 `ApiException`).
+- Duplicate webhook events overwrote in-flight jobs with a new report secret.
+- `httpx.AsyncClient` now honors `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE` for
+  air-gapped GHES with private CA.
+- `git fetch` / `git show` argument injection from webhook payload values.
+- `opencode` subprocess killed on timeout instead of leaking a zombie.
+- `git diff` output capped at 100 MB to prevent OOM in reviewer pods.
+- K8s API calls use 30-second timeout to prevent thread pool exhaustion.
+- `asyncio.get_event_loop()` replaced with `get_running_loop()`.
+- `mark_posted` handles 404 gracefully on race with concurrent cleanup.
+- `check_repo_collaborator` returns `False` on HTTP errors instead of raising.
+- `get_pod_phase` handles `None` pod status gracefully.
+- Durable state inconsistency when `post_review` fails after `mark_posted`.
+- `HERMIT_OPCODE_ARGS` joined with `shlex.join` to preserve quoting.
+- Sweep marks durable state `failed` before deleting secrets for Failed pods.
