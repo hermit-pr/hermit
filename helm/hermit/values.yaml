@@ -50,7 +50,11 @@ config:
   # Image used to run reviewer (slave) pods; defaults to the master image.
   podImage: ""
   podNamespace: ""
-  podServiceAccount: hermit
+  # ServiceAccount used by the master Deployment (needs pod+secret RBAC).
+  serviceAccountName: hermit-master
+  # ServiceAccount assigned to reviewer (slave) pods. Reviewer pods do
+  # not receive a RoleBinding — they only need to exist in the namespace.
+  podServiceAccount: hermit-reviewer
   reportTimeoutSeconds: 1800
   # Resource requests/limits for reviewer (slave) pods.
   podResources:
@@ -113,7 +117,13 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-resources: {}
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
 nodeSelector: {}
 tolerations: []
 affinity: {}
