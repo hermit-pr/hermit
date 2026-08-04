@@ -451,7 +451,6 @@ class K8sPodSpawner(PodSpawner):
             ),
         )
 
-    # pylint: disable=too-many-locals
     async def spawn(
         self, job: ReviewJob, environment: dict[str, str]
     ) -> tuple[str, str]:
@@ -482,7 +481,6 @@ class K8sPodSpawner(PodSpawner):
             volumes=volumes,
             volume_mounts=volume_mounts,
         )
-        image = self._settings.pod_image
         try:
             await asyncio.to_thread(api.create_namespaced_secret, namespace, secret)
         except kubernetes.client.ApiException as exc:
@@ -502,7 +500,7 @@ class K8sPodSpawner(PodSpawner):
             "created reviewer pod %s in %s (image=%s)",
             pod_name,
             namespace,
-            image,
+            self._settings.pod_image,
         )
         return pod_name, secret_name
 
@@ -657,6 +655,8 @@ class K8sPodSpawner(PodSpawner):
 
     async def sweep(self) -> None:
         """Reclaim finished or stale reviewer pods and orphaned Secrets."""
+        import kubernetes  # pylint: disable=import-outside-toplevel
+
         api = self._api()
         namespace = self._namespace()
         cutoff = time.time() - self._settings.report_timeout_seconds
@@ -666,7 +666,7 @@ class K8sPodSpawner(PodSpawner):
                 namespace,
                 label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except kubernetes.client.ApiException:
             logger.debug("pod sweep failed in %s", namespace)
             return
         for pod in pods.items or []:
@@ -679,13 +679,13 @@ class K8sPodSpawner(PodSpawner):
             job_id = (pod.metadata.labels or {}).get(JOB_LABEL_KEY)
             try:
                 await asyncio.to_thread(api.delete_namespaced_pod, name, namespace)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except kubernetes.client.ApiException:
                 logger.debug("could not delete pod %s", name)
             if job_id:
                 if (pod.status.phase or "") == "Failed":
                     try:
                         await self.mark_failed(job_id)
-                    except Exception:  # pylint: disable=broad-exception-caught
+                    except kubernetes.client.ApiException:
                         pass
                 try:
                     await asyncio.to_thread(
@@ -693,7 +693,7 @@ class K8sPodSpawner(PodSpawner):
                         self._secret_name(job_id),
                         namespace,
                     )
-                except Exception:  # pylint: disable=broad-exception-caught
+                except kubernetes.client.ApiException:
                     logger.debug("could not delete secret for job %s", job_id)
         try:
             secrets = await asyncio.to_thread(
@@ -701,7 +701,7 @@ class K8sPodSpawner(PodSpawner):
                 namespace,
                 label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except kubernetes.client.ApiException:
             logger.debug("secret sweep failed in %s", namespace)
             return
         for secret in secrets.items or []:
@@ -711,7 +711,7 @@ class K8sPodSpawner(PodSpawner):
                     await asyncio.to_thread(
                         api.delete_namespaced_secret, secret.metadata.name, namespace
                     )
-                except Exception:  # pylint: disable=broad-exception-caught
+                except kubernetes.client.ApiException:
                     logger.debug("could not delete secret %s", secret.metadata.name)
 
 

@@ -510,24 +510,33 @@ async def _recover_watchers(
     spawner: PodSpawner,
     track: Callable[[ReviewJob], None],
 ) -> None:
-    """On startup, create watchers for jobs that still have running pods."""
-    try:
-        active = await spawner.list_active_job_ids()
-    except Exception:  # pylint: disable=broad-exception-caught
-        logger.exception("failed to list active jobs for recovery")
-        return
+    """On startup, create watchers for jobs that still have running pods.
+    Errors (ApiException from K8s calls) propagate to the caller.
+    """
+    active = await spawner.list_active_job_ids()
     for job_id in active:
-        try:
-            durable = await spawner.get_job(job_id)
-        except Exception:  # pylint: disable=broad-exception-caught
-            continue
+        durable = await spawner.get_job(job_id)
         if durable is None:
             continue
         track(durable)
         logger.info("recovered watcher for job %s after restart", job_id)
 
 
+async def _limit_body_size(
+    request: Request, call_next: ASGIApp, max_body_bytes: int
+) -> JSONResponse:
+    """Middleware that rejects requests exceeding the body size limit."""
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > max_body_bytes:
+        return JSONResponse({"error": "payload too large"}, status_code=413)
+    return await call_next(request)
+
+
 # pylint: disable=too-many-locals, too-many-statements
+# FastAPI app factories are inherently large when wiring routes, middleware,
+# lifespan, and dependency injection in a single function.  The local count
+# and statement count reflect nested endpoint handlers that cannot be trivially
+# extracted without passing 8+ captured closures as explicit parameters.
 
 
 def create_app(
@@ -561,7 +570,10 @@ def create_app(
             await spawner.sweep()
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("initial sweep failed")
-        await _recover_watchers(spawner, track)
+        try:
+            await _recover_watchers(spawner, track)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("recovery of orphan watchers failed")
         for task in (_sweeper(spawner), _evictor(store)):
             created = asyncio.create_task(task)
             tasks.add(created)
@@ -577,14 +589,9 @@ def create_app(
     app = FastAPI(title="H.E.R.M.I.T", version=__version__, lifespan=lifespan)
 
     @app.middleware("http")
-    async def limit_body_size(request: Request, call_next: ASGIApp) -> JSONResponse:
-        """Reject requests whose declared body exceeds the size limit."""
-        length = request.headers.get("content-length")
-        if length and length.isdigit() and int(length) > settings.max_body_bytes:
-            return JSONResponse({"error": "payload too large"}, status_code=413)
-        return await call_next(request)
+    async def _body_limit(request: Request, call_next: ASGIApp) -> JSONResponse:
+        return await _limit_body_size(request, call_next, settings.max_body_bytes)
 
-    # pylint: disable=too-many-return-statements
     async def accept(
         request: Request, provider: str, validate: Callable[[bytes], None]
     ) -> JSONResponse:
