@@ -508,6 +508,8 @@ class K8sPodSpawner(PodSpawner):
 
     async def cleanup(self, job: ReviewJob) -> None:
         """Delete the reviewer pod and its secret, ignoring not-found errors."""
+        import kubernetes  # pylint: disable=import-outside-toplevel
+
         api = self._api()
         namespace = self._namespace()
         for name, delete in (
@@ -519,7 +521,7 @@ class K8sPodSpawner(PodSpawner):
             try:
                 await asyncio.to_thread(delete, name, namespace)
                 logger.debug("deleted %s in %s", name, namespace)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except kubernetes.client.ApiException:
                 logger.debug("could not delete %s in %s", name, namespace)
 
     @staticmethod
@@ -593,6 +595,8 @@ class K8sPodSpawner(PodSpawner):
 
     async def mark_failed(self, job_id: str) -> None:
         """Best-effort record that the review could not be posted."""
+        import kubernetes  # pylint: disable=import-outside-toplevel
+
         api = self._api()
         namespace = self._namespace()
         name = self._secret_name(job_id)
@@ -606,22 +610,26 @@ class K8sPodSpawner(PodSpawner):
             await asyncio.to_thread(
                 api.replace_namespaced_secret, name, namespace, secret
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except kubernetes.client.ApiException:
             logger.debug("could not mark job %s failed", job_id)
 
     async def get_pod_phase(self, job_id: str) -> str | None:
         """Return the pod phase for ``job_id`` or ``None`` if the pod is gone."""
+        import kubernetes  # pylint: disable=import-outside-toplevel
+
         api = self._api()
         namespace = self._namespace()
         name = self._pod_name(job_id)
         try:
             pod = await asyncio.to_thread(api.read_namespaced_pod, name, namespace)
             return (pod.status or object()).phase
-        except Exception:  # pylint: disable=broad-exception-caught
+        except kubernetes.client.ApiException:
             return None
 
     async def list_active_job_ids(self) -> list[str]:
         """Return the job IDs of all reviewer pods that are still active."""
+        import kubernetes  # pylint: disable=import-outside-toplevel
+
         api = self._api()
         namespace = self._namespace()
         try:
@@ -630,7 +638,7 @@ class K8sPodSpawner(PodSpawner):
                 namespace,
                 label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
             )
-        except Exception:  # pylint: disable=broad-exception-caught
+        except kubernetes.client.ApiException:
             return []
         active = []
         for pod in pods.items or []:

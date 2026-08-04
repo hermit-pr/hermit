@@ -5,11 +5,13 @@ import hmac
 import json
 import logging
 import random
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Callable, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp
 
 from hermit import __version__
 from hermit.config import Settings
@@ -403,10 +405,10 @@ async def _authorize_gitlab_commenter(
         raise PermissionError("commenter is not a project member")
 
 
-# pylint: disable=too-many-positional-arguments
 async def _launch(
     provider: str,
     event: ChangeEvent,
+    *,
     settings: Settings,
     spawner: PodSpawner,
     store: JobStore,
@@ -504,6 +506,27 @@ async def _handle_report_failure(
     return JSONResponse({"status": "failure_acknowledged"}, status_code=200)
 
 
+async def _recover_watchers(
+    spawner: PodSpawner,
+    track: Callable[[ReviewJob], None],
+) -> None:
+    """On startup, create watchers for jobs that still have running pods."""
+    try:
+        active = await spawner.list_active_job_ids()
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("failed to list active jobs for recovery")
+        return
+    for job_id in active:
+        try:
+            durable = await spawner.get_job(job_id)
+        except Exception:  # pylint: disable=broad-exception-caught
+            continue
+        if durable is None:
+            continue
+        track(durable)
+        logger.info("recovered watcher for job %s after restart", job_id)
+
+
 # pylint: disable=too-many-locals, too-many-statements
 
 
@@ -523,23 +546,6 @@ def create_app(
         trust_x_forwarded_for=settings.trust_x_forwarded_for,
     )
 
-    async def _recover_watchers() -> None:
-        """On startup, create watchers for jobs that still have running pods."""
-        try:
-            active = await spawner.list_active_job_ids()
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.exception("failed to list active jobs for recovery")
-            return
-        for job_id in active:
-            try:
-                durable = await spawner.get_job(job_id)
-            except Exception:  # pylint: disable=broad-exception-caught
-                continue
-            if durable is None:
-                continue
-            track(durable)
-            logger.info("recovered watcher for job %s after restart", job_id)
-
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
         task = asyncio.create_task(
@@ -549,13 +555,13 @@ def create_app(
         task.add_done_callback(tasks.discard)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         """Run a first sweep and keep reclaiming orphaned jobs on a timer."""
         try:
             await spawner.sweep()
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("initial sweep failed")
-        await _recover_watchers()
+        await _recover_watchers(spawner, track)
         for task in (_sweeper(spawner), _evictor(store)):
             created = asyncio.create_task(task)
             tasks.add(created)
@@ -571,34 +577,11 @@ def create_app(
     app = FastAPI(title="H.E.R.M.I.T", version=__version__, lifespan=lifespan)
 
     @app.middleware("http")
-    async def limit_body_size(request: Request, call_next) -> JSONResponse:
-        """Reject requests whose body exceeds the size limit.
-
-        Handles both Content-Length and chunked transfer encoding by wrapping
-        the receive stream with a byte counter.
-        """
+    async def limit_body_size(request: Request, call_next: ASGIApp) -> JSONResponse:
+        """Reject requests whose declared body exceeds the size limit."""
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > settings.max_body_bytes:
             return JSONResponse({"error": "payload too large"}, status_code=413)
-        if not length:
-            original_receive = request.receive
-            max_bytes = settings.max_body_bytes
-            consumed = 0
-
-            async def limited_receive():
-                nonlocal consumed
-                message = await original_receive()
-                if message["type"] == "http.request":
-                    consumed += len(message.get("body", b""))
-                    if consumed > max_bytes:
-                        return {
-                            "type": "http.response.start",
-                            "status": 413,
-                            "headers": [(b"content-type", b"application/json")],
-                        }
-                return message
-
-            request._receive = limited_receive  # pylint: disable=protected-access
         return await call_next(request)
 
     # pylint: disable=too-many-return-statements
@@ -616,7 +599,15 @@ def create_app(
         if event is None:
             logger.warning("ignoring %s webhook (no review triggered)", provider)
             return JSONResponse({"status": "ignored"}, status_code=202)
-        return await _launch(provider, event, settings, spawner, store, track, client)
+        return await _launch(
+            provider,
+            event,
+            settings=settings,
+            spawner=spawner,
+            store=store,
+            track=track,
+            client=client,
+        )
 
     @app.get("/healthz")
     async def healthz() -> dict:
