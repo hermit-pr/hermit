@@ -55,7 +55,7 @@ spec:
                   key: {{ .Values.secrets.gitReadToken.key | required "secrets.gitReadToken.key is required" | quote }}
             {{- end }}
             {{- if .Values.secrets.gitRWToken.name }}
-            - name: HERMIT_GIT_{{ if eq .Values.config.gitProvider "gitlab" }}LAB{{ else }}HUB{{ end }}_TOKEN
+            - name: HERMIT_{{ if eq .Values.config.gitProvider "gitlab" }}GITLAB{{ else }}GITHUB{{ end }}_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.gitRWToken.name | quote }}

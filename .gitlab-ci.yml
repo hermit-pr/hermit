@@ -61,7 +61,7 @@ shfmt:
 helm-lint:
   stage: test
   image:
-    name: alpine/helm:3.16.4
+    name: alpine/helm:3.21.1
     entrypoint: [""]
   script:
     - helm lint helm/hermit
@@ -96,7 +96,7 @@ docker-build:
 helm-package:
   stage: build
   image:
-    name: alpine/helm:3.16.4
+    name: alpine/helm:3.21.1
     entrypoint: [""]
   before_script:
     - helm registry login -u "$CI_REGISTRY_USER" -p "$CI_JOB_TOKEN" "$CI_REGISTRY"

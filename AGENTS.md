@@ -17,11 +17,13 @@ The bot is implemented in **Python** (FastAPI webhook server). `README.md` is th
 
 All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 
-- Format: `black .` then `isort .`; also `shfmt -i 2 -w docker/entrypoint.sh`
-- Lint (must all pass, zero warnings): `black --check . && isort --check-only . && flake8 src tests && pylint src tests`
+- Format: `black .` then `isort .`; shell scripts via `docker run --rm -v "$PWD:/workspace" -w /workspace alpine:latest sh -c "apk add --no-cache shfmt >/dev/null && shfmt -i 2 -w docker/entrypoint.sh"`
+- Lint (must all pass, zero warnings): `black --check . && isort --check-only . && flake8 src tests && pylint src tests && docker run --rm -v "$PWD:/workspace" -w /workspace koalaman/shellcheck-alpine:stable shellcheck docker/entrypoint.sh`
 - Tests: `pytest -v`
 - Image: `docker build -f docker/Dockerfile -t hermit .`
-- Chart: `helm lint helm/hermit` and `helm template hermit helm/hermit`
+- Chart (run in the CI image so the local `helm` doesn't need installing):
+  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:3.21.1 lint helm/hermit`
+  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:3.21.1 template hermit helm/hermit`
 
 ## Conventions
 
