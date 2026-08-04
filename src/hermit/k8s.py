@@ -205,7 +205,7 @@ class K8sPodSpawner(PodSpawner):
             kubernetes.config.load_incluster_config()
         client = kubernetes.client.CoreV1Api()
         client.api_client.rest_client.pool_manager.connection_pool_kw.setdefault(
-            "timeout", 30.0
+            "timeout", 30.0  # urllib3.Timeout — sets both connect and read deadlines
         )
         self._client = client
         return self._client
@@ -548,6 +548,10 @@ class K8sPodSpawner(PodSpawner):
         data = secret.data or {}
         event = ChangeEvent.model_validate_json(self._decode(data, "event"))
         status = (secret.metadata.annotations or {}).get(STATUS_ANNOTATION, "pending")
+        created_ts = secret.metadata.creation_timestamp
+        started_at: float | None = None
+        if created_ts is not None:
+            started_at = created_ts.timestamp()
         return ReviewJob(
             id=job_id,
             event=event,
@@ -555,6 +559,7 @@ class K8sPodSpawner(PodSpawner):
             status=status,
             pod_name=self._pod_name(job_id),
             secret_name=name,
+            started_at=started_at,
         )
 
     async def mark_posted(self, job_id: str) -> bool:
@@ -620,7 +625,7 @@ class K8sPodSpawner(PodSpawner):
         name = self._pod_name(job_id)
         try:
             pod = await asyncio.to_thread(api.read_namespaced_pod, name, namespace)
-            return (pod.status or object()).phase
+            return pod.status.phase if pod.status else None
         except kubernetes.client.ApiException:
             return None
 

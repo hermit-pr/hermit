@@ -5,13 +5,14 @@ import hmac
 import json
 import logging
 import random
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Callable, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hermit import __version__
 from hermit.config import Settings
@@ -37,6 +38,42 @@ GITHUB_ACTIONS = ("opened", "reopened", "synchronize")
 GITLAB_ACTIONS = ("open", "reopen", "update")
 BOT_MENTION = "@hermit"
 WATCH_POLL_SECONDS = 5.0
+
+
+class _BodyLimitMiddleware:
+    """ASGI middleware that rejects request bodies exceeding *max_bytes*.
+
+    Operates at the ASGI level so it handles chunked transfer encoding
+    where no ``Content-Length`` header is present.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self._app = app
+        self._max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        max_bytes = self._max_bytes
+        consumed = 0
+
+        async def limited_receive() -> dict:
+            nonlocal consumed
+            message = await receive()
+            if message["type"] == "http.request":
+                consumed += len(message.get("body", b""))
+                if consumed > max_bytes:
+                    response = JSONResponse(
+                        {"error": "payload too large"}, status_code=413
+                    )
+                    await response(scope, receive, send)
+                    return {"type": "http.disconnect"}
+            return message
+
+        await self._app(scope, limited_receive, send)
+
+
 WATCH_RETRY_ATTEMPTS = 5
 WATCH_RETRY_BASE_DELAY = 1.0
 
@@ -509,27 +546,24 @@ async def _handle_report_failure(
 async def _recover_watchers(
     spawner: PodSpawner,
     track: Callable[[ReviewJob], None],
+    timeout_seconds: float,
 ) -> None:
     """On startup, create watchers for jobs that still have running pods.
-    Errors (ApiException from K8s calls) propagate to the caller.
+
+    Recovered watchers use the remaining timeout from the original
+    job start so that restarts do not extend the review window
+    indefinitely.
     """
     active = await spawner.list_active_job_ids()
     for job_id in active:
         durable = await spawner.get_job(job_id)
         if durable is None:
             continue
+        if durable.started_at is not None:
+            elapsed = time.time() - durable.started_at
+            durable.recovery_timeout = max(60.0, timeout_seconds - elapsed)
         track(durable)
         logger.info("recovered watcher for job %s after restart", job_id)
-
-
-async def _limit_body_size(
-    request: Request, call_next: ASGIApp, max_body_bytes: int
-) -> JSONResponse:
-    """Middleware that rejects requests exceeding the body size limit."""
-    length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > max_body_bytes:
-        return JSONResponse({"error": "payload too large"}, status_code=413)
-    return await call_next(request)
 
 
 # pylint: disable=too-many-locals, too-many-statements
@@ -557,9 +591,8 @@ def create_app(
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
-        task = asyncio.create_task(
-            _watch_job(job, spawner, store, settings.report_timeout_seconds, client)
-        )
+        timeout = job.recovery_timeout or settings.report_timeout_seconds
+        task = asyncio.create_task(_watch_job(job, spawner, store, timeout, client))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
@@ -571,7 +604,7 @@ def create_app(
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("initial sweep failed")
         try:
-            await _recover_watchers(spawner, track)
+            await _recover_watchers(spawner, track, settings.report_timeout_seconds)
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("recovery of orphan watchers failed")
         for task in (_sweeper(spawner), _evictor(store)):
@@ -587,10 +620,7 @@ def create_app(
         await client.aclose()
 
     app = FastAPI(title="H.E.R.M.I.T", version=__version__, lifespan=lifespan)
-
-    @app.middleware("http")
-    async def _body_limit(request: Request, call_next: ASGIApp) -> JSONResponse:
-        return await _limit_body_size(request, call_next, settings.max_body_bytes)
+    app.add_middleware(_BodyLimitMiddleware, max_bytes=settings.max_body_bytes)
 
     async def accept(
         request: Request, provider: str, validate: Callable[[bytes], None]
@@ -717,6 +747,10 @@ def create_app(
             job.status = "failed"
             job.error = "review submission failed"
             job.reported.set()
+            try:
+                await spawner.mark_failed(job_id)
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.debug("could not mark durable state failed for %s", job_id)
             return JSONResponse({"error": "review submission failed"}, status_code=502)
         job.body = body
         job.status = "posted"

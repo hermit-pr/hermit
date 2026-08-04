@@ -226,6 +226,9 @@ def extract_policy(
     Returns:
         True when the policy file exists at the base commit and was written.
     """
+    if base.startswith("-"):
+        logger.error("rejecting policy extraction: base ref %r starts with '-'", base)
+        return False
     result = subprocess.run(
         [
             "git",

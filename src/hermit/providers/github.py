@@ -125,5 +125,11 @@ class GitHubClient(GitClient):
                 username,
             )
             return False
-        response.raise_for_status()
+        logger.warning(
+            "repo collaborator check returned %d for %s/%s; "
+            "assuming not a collaborator",
+            response.status_code,
+            repo,
+            username,
+        )
         return False
