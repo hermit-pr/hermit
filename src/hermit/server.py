@@ -706,7 +706,9 @@ def create_app(
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
-        timeout = getattr(job, "recovery_timeout", None) or settings.report_timeout_seconds
+        timeout = (
+            getattr(job, "recovery_timeout", None) or settings.report_timeout_seconds
+        )
         task = asyncio.create_task(_watch_job(job, spawner, store, timeout, client))
         tasks.add(task)
         task.add_done_callback(tasks.discard)

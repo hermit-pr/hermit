@@ -9,6 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.description="H.E.R.M.I.T — airgapped code-review bot for on-premise GitLab & GitHub, powered by opencode + vLLM"
+
 RUN groupadd --system hermit \
     && useradd --system --gid hermit --home-dir /app hermit \
     && apt-get update \

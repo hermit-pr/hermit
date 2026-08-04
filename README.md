@@ -182,7 +182,7 @@ kubectl create secret generic report-signing --from-literal=token=$(openssl rand
 ### 3. Install the chart
 
 The `helm-package` pipeline job packages the chart and pushes it to
-`oci://$CI_REGISTRY_IMAGE/charts` (here `oci://registry.gitlab.com/hermit-bot/hermit/charts`). Authenticate to the registry if it is private, then install from the OCI reference (supply the chart `version` to pick a specific release):
+`oci://$CI_REGISTRY_IMAGE/charts` (here `oci://registry.gitlab.com/hermit-bot/hermit/charts`). The chart is also published to `oci://ghcr.io/hermit-pr/hermit/charts` via GitHub Actions on tagged releases. Authenticate to the registry if it is private, then install from the OCI reference (supply the chart `version` to pick a specific release):
 
 ```sh
 helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
