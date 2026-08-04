@@ -8,26 +8,33 @@ class RateLimiter:
     """Tracks request timestamps per client IP and globally.
 
     A window of ``window`` seconds admits at most ``per_ip`` requests from a
-    single source and ``global_limit`` requests overall. The real client IP is
-    read from ``X-Forwarded-For`` when present so the limiter works behind a
-    proxy. Stale entries are pruned on every call to bound memory usage.
+    single source and ``global_limit`` requests overall. When
+    ``trust_x_forwarded_for`` is True the real client IP is read from the
+    rightmost entry of ``X-Forwarded-For`` (reverse-proxy chain); otherwise the
+    direct connection address is used. Stale entries are pruned on every call
+    to bound memory usage.
     """
 
     def __init__(
-        self, window: float = 60.0, per_ip: int = 60, global_limit: int = 600
+        self,
+        window: float = 60.0,
+        per_ip: int = 60,
+        global_limit: int = 600,
+        trust_x_forwarded_for: bool = False,
     ) -> None:
         self._window = window
         self._per_ip = per_ip
         self._global_limit = global_limit
+        self._trust_xff = trust_x_forwarded_for
         self._ip_hits: dict[str, list[float]] = {}
         self._global_hits: list[float] = []
 
-    @staticmethod
-    def client_ip(request: Any) -> str:
+    def client_ip(self, request: Any) -> str:
         """Return the real client IP for ``request``."""
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        if self._trust_xff:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                return forwarded.split(",")[-1].strip()
         if request.client is not None:
             return request.client.host
         return "unknown"

@@ -9,40 +9,76 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
 BASE_TAG = "base-sha"
+MAX_DIFF_BYTES = 100 * 1024 * 1024
 
 
-def _run(args: list[str], env: dict[str, str] | None = None) -> str:
+def _run(
+    args: list[str], env: dict[str, str] | None = None, max_bytes: int | None = None
+) -> str:
     """Run a git command and return its stdout.
 
     Args are not logged because a clone URL may be sensitive.
 
+    Args:
+        args: The command and arguments.
+        env: Environment dict.
+        max_bytes: If set, limit stdout to this many bytes; raise RuntimeError
+            if exceeded.
+
     Raises:
-        RuntimeError: if the command exits with a non-zero status.
+        RuntimeError: if the command exits with a non-zero status or exceeds
+            ``max_bytes``.
     """
     logger.debug("running git command: %s", args[0])
-    result = subprocess.run(args, capture_output=True, text=True, check=False, env=env)
-    if result.returncode != 0:
-        message = result.stderr.strip()
-        raise RuntimeError(f"{args[0]} failed: {message}")
-    return result.stdout
+    if max_bytes is None:
+        result = subprocess.run(
+            args, capture_output=True, text=True, check=False, env=env
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip()
+            raise RuntimeError(f"{args[0]} failed: {message}")
+        return result.stdout
+    chunks: list[str] = []
+    total = 0
+    with subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
+    ) as process:
+        assert process.stdout is not None
+        while True:
+            chunk = process.stdout.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                process.kill()
+                raise RuntimeError(f"{args[0]} output exceeded {max_bytes} bytes")
+            chunks.append(chunk)
+        returncode = process.wait()
+        if returncode != 0:
+            stderr_output = process.stderr.read() if process.stderr else ""
+            raise RuntimeError(f"{args[0]} failed: {stderr_output.strip()}")
+    return "".join(chunks)
 
 
 def authenticated_url(host_url: str, repo: str, provider: str) -> str:
     """Build a clone URL for the given provider, without credentials.
 
     Only the username is embedded (``oauth2`` for GitLab, ``x-access-token`` for
-    GitHub); the password (the read token) is supplied by ``GIT_ASKPASS``.
+    GitHub); the password (the read token) is supplied by ``GIT_ASKPASS``.  The
+    API path (e.g. ``/api/v3`` for GitHub Enterprise) is stripped from the URL
+    so that the clone URL targets the git server rather than the REST API.
     """
     parsed = urlsplit(host_url)
     scheme = parsed.scheme or "https"
     host = parsed.netloc
     username = "oauth2" if provider == "gitlab" else "x-access-token"
-    return f"{scheme}://{username}@{host}/{repo}.git"
+    base = urlunsplit((scheme, f"{username}@{host}", "", "", ""))
+    return f"{base}/{repo}.git"
 
 
 def write_askpass(path: str) -> None:
@@ -114,7 +150,7 @@ def clone_and_diff(
     _run(["git", "-C", str(directory), "remote", "add", "origin", source_url], env=env)
     base = base_sha or f"refs/heads/{base_ref}"
     _run(
-        ["git", "-C", str(directory), "fetch", "--depth", "1", "origin", base],
+        ["git", "-C", str(directory), "fetch", "--depth", "1", "origin", "--", base],
         env=env,
     )
     if provider == "github" and pr_number:
@@ -152,6 +188,7 @@ def clone_and_diff(
                 "--depth",
                 "1",
                 "head-source",
+                "--",
                 head_sha or f"refs/heads/{head_ref}",
             ],
             env=env,
@@ -166,6 +203,7 @@ def clone_and_diff(
                 "--depth",
                 "1",
                 "origin",
+                "--",
                 head_sha or f"refs/heads/{head_ref}",
             ],
             env=env,
@@ -173,7 +211,11 @@ def clone_and_diff(
     _run(["git", "-C", str(directory), "checkout", "-q", "FETCH_HEAD"], env=env)
     base_object = base_sha or f"refs/remotes/origin/{base_ref}"
     _run(["git", "-C", str(directory), "tag", "-f", BASE_TAG, base_object], env=env)
-    return _run(["git", "-C", str(directory), "diff", "--no-color", BASE_TAG], env=env)
+    return _run(
+        ["git", "-C", str(directory), "diff", "--no-color", BASE_TAG],
+        env=env,
+        max_bytes=MAX_DIFF_BYTES,
+    )
 
 
 def extract_policy(

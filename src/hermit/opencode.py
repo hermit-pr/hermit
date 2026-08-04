@@ -170,9 +170,14 @@ class OpenCodeRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=self._timeout
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=self._timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise RuntimeError(f"opencode timed out after {self._timeout}s") from None
         logger.debug("opencode exited with %d", process.returncode)
         if process.returncode != 0:
             message = stderr.decode().strip()

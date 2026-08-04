@@ -74,7 +74,7 @@ class GitLabClient(GitClient):
             pr_title=merge_request.get("title") or "",
             pr_body=merge_request.get("description") or "",
             url=merge_request.get("web_url") or "",
-            project_id=merge_request.get("iid"),
+            project_id=merge_request.get("project_id"),
             source_repo=event.source_repo,
         )
 

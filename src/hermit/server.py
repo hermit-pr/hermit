@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import logging
+import random
 from contextlib import asynccontextmanager
 from typing import Callable, Optional
 
@@ -34,6 +35,8 @@ GITHUB_ACTIONS = ("opened", "reopened", "synchronize")
 GITLAB_ACTIONS = ("open", "reopen", "update")
 BOT_MENTION = "@hermit"
 WATCH_POLL_SECONDS = 5.0
+WATCH_RETRY_ATTEMPTS = 5
+WATCH_RETRY_BASE_DELAY = 1.0
 
 
 def parse_github(payload: dict) -> Optional[ChangeEvent]:
@@ -122,7 +125,7 @@ def _parse_gitlab_merge_request(payload: dict) -> Optional[ChangeEvent]:
         provider="gitlab",
         action=action,
         repo=target,
-        project_id=attributes.get("iid"),
+        project_id=project.get("id"),
         ref=str(attributes.get("iid") or ""),
         head_sha=last_commit.get("id") or "",
         head_ref=attributes.get("source_branch") or "",
@@ -148,12 +151,66 @@ def _parse_gitlab_note(payload: dict) -> Optional[ChangeEvent]:
         provider="gitlab",
         action="comment",
         repo=project.get("path_with_namespace") or "",
-        project_id=merge_request.get("iid"),
+        project_id=project.get("id"),
         ref=ref,
         pr_title=merge_request.get("title") or "",
         pr_body=merge_request.get("description") or "",
         url=merge_request.get("url") or "",
     )
+
+
+async def _fetch_durable(
+    job: ReviewJob, spawner: PodSpawner, retries: int, remaining: float
+) -> tuple[Optional[ReviewJob], int]:
+    """Fetch durable job state with a single retry on transient failure.
+
+    Returns ``(durable, retries)``.  On transient K8s API errors the call
+    sleeps briefly and increments ``retries``; the caller must re-invoke until
+    either a result is obtained or the retry budget is exhausted.
+    """
+    try:
+        return (await spawner.get_job(job.id)), 0
+    except Exception:  # pylint: disable=broad-exception-caught
+        if retries >= WATCH_RETRY_ATTEMPTS:
+            logger.warning(
+                "job %s: giving up after %d K8s API retries", job.id, retries
+            )
+            return None, retries
+        delay = min(WATCH_RETRY_BASE_DELAY * (2**retries), 30.0)
+        delay += random.uniform(0, delay * 0.5)
+        logger.debug(
+            "job %s: transient K8s API error; retrying in %.1fs", job.id, delay
+        )
+        try:
+            await asyncio.wait_for(job.reported.wait(), timeout=min(delay, remaining))
+        except asyncio.TimeoutError:
+            pass
+        return None, retries + 1
+
+
+async def _resolve_durable_state(
+    durable: Optional[ReviewJob],
+    job: ReviewJob,
+    spawner: PodSpawner,
+) -> None:
+    """Set *job.status* based on the durable secret and pod phase."""
+    if durable is not None and durable.status in ("posted", "failed"):
+        job.status = durable.status
+        logger.info("job %s finished; cleaning up", job.id)
+        return
+    if durable is None:
+        phase = await spawner.get_pod_phase(job.id)
+        if phase is None:
+            job.status = "failed"
+            job.error = "reviewer pod disappeared"
+            logger.warning("job %s: durable state and pod both gone", job.id)
+        elif phase == "Failed":
+            job.status = "failed"
+            job.error = "reviewer pod failed"
+            logger.warning("job %s: pod entered Failed phase", job.id)
+        else:
+            job.status = "posted"
+            logger.info("job %s: pod %s, treating as posted", job.id, phase)
 
 
 async def _watch_job(
@@ -167,10 +224,13 @@ async def _watch_job(
 
     Completion is detected through the in-memory report event (fast path, same
     replica) or by polling the durable job status in Kubernetes (any replica,
-    and after a master restart).
+    and after a master restart).  Transient K8s API errors are retried with
+    exponential backoff; a permanent 404 or the pod entering a terminal phase
+    also triggers a state transition.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
+    retries = 0
     try:
         while not job.reported.is_set():
             remaining = deadline - loop.time()
@@ -193,10 +253,13 @@ async def _watch_job(
                             job.event.ref,
                         )
                 break
-            durable = await spawner.get_job(job.id)
-            if durable is None or durable.status in ("posted", "failed"):
-                job.status = durable.status if durable else "posted"
-                logger.info("job %s finished; cleaning up", job.id)
+            durable, retries = await _fetch_durable(job, spawner, retries, remaining)
+            if retries > 0:
+                if retries >= WATCH_RETRY_ATTEMPTS:
+                    break
+                continue
+            await _resolve_durable_state(durable, job, spawner)
+            if job.status != "pending":
                 break
             try:
                 await asyncio.wait_for(
@@ -264,6 +327,8 @@ async def _decode_event(
     )
     if provider == "github" and event.action == "comment":
         await _authorize_github_commenter(payload, event, client)
+    if provider == "gitlab" and event.action == "comment":
+        await _authorize_gitlab_commenter(payload, event, client)
     if not event.head_sha:
         try:
             event = await client.resolve_refs(event)
@@ -312,6 +377,32 @@ async def _authorize_github_commenter(
             raise PermissionError("commenter is not a repository member")
 
 
+async def _authorize_gitlab_commenter(
+    payload: dict, event: ChangeEvent, client: GitClient
+) -> None:
+    """Reject an ``@hermit`` note from a user outside the project namespace.
+
+    Raises:
+        PermissionError: when the comment author is not a member of the group
+            or project that the merge request belongs to.
+    """
+    user = payload.get("user") or {}
+    username = user.get("username") or ""
+    project = payload.get("project") or {}
+    namespace = (project.get("namespace") or "") or event.repo.split("/")[0]
+    if not username:
+        logger.warning("rejected @hermit note: no username")
+        raise PermissionError("commenter is not a project member")
+    is_member = await client.check_membership(namespace, username)
+    if not is_member:
+        logger.warning(
+            "rejected @hermit note from non-member %s on %s",
+            username,
+            event.repo,
+        )
+        raise PermissionError("commenter is not a project member")
+
+
 # pylint: disable=too-many-positional-arguments
 async def _launch(
     provider: str,
@@ -327,6 +418,15 @@ async def _launch(
         logger.warning("max concurrent jobs reached (%d)", settings.max_concurrent_jobs)
         return JSONResponse({"error": "too many concurrent jobs"}, status_code=503)
     job = await store.create(event)
+    if job.pod_name:
+        logger.info(
+            "job %s already in-flight for %s %s#%s; ignoring duplicate",
+            job.id,
+            event.provider,
+            event.repo,
+            event.ref,
+        )
+        return JSONResponse({"status": "ignored", "job_id": job.id}, status_code=202)
     logger.info(
         "starting hermit %s for %s %s#%s",
         job.id,
@@ -374,7 +474,39 @@ async def _launch(
     return JSONResponse({"status": "accepted", "job_id": job.id}, status_code=202)
 
 
+async def _handle_report_failure(
+    job: ReviewJob,
+    job_id: str,
+    body: str,
+    spawner: PodSpawner,
+    client: GitClient,
+) -> JSONResponse:
+    """Process a failure report from a reviewer pod."""
+    logger.warning("reviewer pod reported failure for job %s: %s", job_id, body)
+    job.status = "failed"
+    job.error = body
+    job.reported.set()
+    await spawner.mark_failed(job_id)
+    if job.event.head_sha:
+        try:
+            await client.set_commit_status(
+                job.event,
+                "error",
+                description="Review failed (pod error).",
+                context="hermit/review",
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "failed to set error status for %s#%s",
+                job.event.repo,
+                job.event.ref,
+            )
+    return JSONResponse({"status": "failure_acknowledged"}, status_code=200)
+
+
 # pylint: disable=too-many-locals, too-many-statements
+
+
 def create_app(
     settings: Settings,
     client: GitClient,
@@ -388,7 +520,25 @@ def create_app(
         window=settings.rate_limit_window_seconds,
         per_ip=settings.rate_limit_per_ip,
         global_limit=settings.rate_limit_global,
+        trust_x_forwarded_for=settings.trust_x_forwarded_for,
     )
+
+    async def _recover_watchers() -> None:
+        """On startup, create watchers for jobs that still have running pods."""
+        try:
+            active = await spawner.list_active_job_ids()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("failed to list active jobs for recovery")
+            return
+        for job_id in active:
+            try:
+                durable = await spawner.get_job(job_id)
+            except Exception:  # pylint: disable=broad-exception-caught
+                continue
+            if durable is None:
+                continue
+            track(durable)
+            logger.info("recovered watcher for job %s after restart", job_id)
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
@@ -405,11 +555,16 @@ def create_app(
             await spawner.sweep()
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("initial sweep failed")
+        await _recover_watchers()
         for task in (_sweeper(spawner), _evictor(store)):
             created = asyncio.create_task(task)
             tasks.add(created)
             created.add_done_callback(tasks.discard)
         yield
+        for task in list(tasks):
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await spawner.aclose()
         await client.aclose()
 
@@ -417,10 +572,33 @@ def create_app(
 
     @app.middleware("http")
     async def limit_body_size(request: Request, call_next) -> JSONResponse:
-        """Reject requests whose declared body exceeds the size limit."""
+        """Reject requests whose body exceeds the size limit.
+
+        Handles both Content-Length and chunked transfer encoding by wrapping
+        the receive stream with a byte counter.
+        """
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > settings.max_body_bytes:
             return JSONResponse({"error": "payload too large"}, status_code=413)
+        if not length:
+            original_receive = request.receive
+            max_bytes = settings.max_body_bytes
+            consumed = 0
+
+            async def limited_receive():
+                nonlocal consumed
+                message = await original_receive()
+                if message["type"] == "http.request":
+                    consumed += len(message.get("body", b""))
+                    if consumed > max_bytes:
+                        return {
+                            "type": "http.response.start",
+                            "status": 413,
+                            "headers": [(b"content-type", b"application/json")],
+                        }
+                return message
+
+            request._receive = limited_receive  # pylint: disable=protected-access
         return await call_next(request)
 
     # pylint: disable=too-many-return-statements
@@ -435,7 +613,9 @@ def create_app(
         event, error = await _decode_event(request, provider, validate, client)
         if error is not None:
             return error
-        assert event is not None
+        if event is None:
+            logger.warning("ignoring %s webhook (no review triggered)", provider)
+            return JSONResponse({"status": "ignored"}, status_code=202)
         return await _launch(provider, event, settings, spawner, store, track, client)
 
     @app.get("/healthz")
@@ -465,13 +645,16 @@ def create_app(
     @app.post("/webhook/gitlab")
     async def gitlab_webhook(request: Request) -> JSONResponse:
         """Validate and accept a GitLab webhook request."""
-        return await accept(
-            request,
-            "gitlab",
-            lambda _body: validate_gitlab_token(
-                secret, request.headers.get("x-gitlab-token")
-            ),
-        )
+        try:
+            return await accept(
+                request,
+                "gitlab",
+                lambda _body: validate_gitlab_token(
+                    secret, request.headers.get("x-gitlab-token")
+                ),
+            )
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=403)
 
     # pylint: disable=too-many-return-statements
     @app.post("/internal/report/{job_id}")
@@ -480,7 +663,8 @@ def create_app(
 
         The handler is stateless: it reads the job record from Kubernetes, so
         any replica can serve a report, including after a master restart. A
-        ``posted`` status makes the endpoint idempotent.
+        ``posted`` status makes the endpoint idempotent.  The CAS (mark_posted)
+        is performed *before* posting the review to prevent duplicate comments.
         """
         if not limiter.allow(request):
             return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
@@ -501,9 +685,15 @@ def create_app(
         except Exception:  # pylint: disable=broad-exception-caught
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         body = payload.get("body", "")
+        success = payload.get("success", True)
+        if not success:
+            return await _handle_report_failure(job, job_id, body, spawner, client)
         if not body.strip():
             logger.warning("rejected empty review body for job %s", job_id)
             return JSONResponse({"error": "empty review body"}, status_code=400)
+        if not await spawner.mark_posted(job_id):
+            logger.info("job %s was already posted by another replica", job_id)
+            return JSONResponse({"status": "ok"}, status_code=200)
         try:
             await client.post_review(job.event, body)
         except Exception:  # pylint: disable=broad-exception-caught
@@ -529,7 +719,6 @@ def create_app(
             job.status = "failed"
             job.error = "review submission failed"
             job.reported.set()
-            await spawner.mark_failed(job_id)
             return JSONResponse({"error": "review submission failed"}, status_code=502)
         job.body = body
         job.status = "posted"
@@ -547,10 +736,7 @@ def create_app(
                 job.event.repo,
                 job.event.ref,
             )
-        if await spawner.mark_posted(job_id):
-            await spawner.cleanup(job)
-        else:
-            logger.info("job %s was already posted by another replica", job_id)
+        await spawner.cleanup(job)
         logger.info(
             "received review from slave PR #%s repo %s",
             job.event.ref,

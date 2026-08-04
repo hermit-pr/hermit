@@ -70,6 +70,7 @@ class Settings(_SettingsBase):
     rate_limit_per_ip: int = 60
     rate_limit_global: int = 600
     rate_limit_window_seconds: int = 60
+    trust_x_forwarded_for: bool = False
     max_body_bytes: int = 10 * 1024 * 1024
 
     pod_cpu_request: str = "200m"

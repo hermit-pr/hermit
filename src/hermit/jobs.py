@@ -57,9 +57,17 @@ class JobStore:
         self.ttl_seconds = ttl_seconds
 
     async def create(self, event: ChangeEvent) -> ReviewJob:
-        """Create and record a job for ``event``."""
+        """Create and record a job for ``event``.
+
+        Returns the existing job if one with the same deterministic id already
+        exists, so that duplicated webhooks never overwrite an in-flight job.
+        """
+        job_id = compute_job_id(event, self._signing_key)
+        existing = self._jobs.get(job_id)
+        if existing is not None:
+            return existing
         job = ReviewJob(
-            id=compute_job_id(event, self._signing_key),
+            id=job_id,
             event=event,
             report_secret=secrets.token_urlsafe(32),
         )

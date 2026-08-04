@@ -22,7 +22,7 @@ async def report_review(
     client = http or httpx.AsyncClient()
     try:
         response = await client.post(
-            url, json={"body": body}, headers=headers, timeout=120.0
+            url, json={"body": body, "success": True}, headers=headers, timeout=120.0
         )
         logger.debug("report POST returned status %d", response.status_code)
         response.raise_for_status()
@@ -48,7 +48,7 @@ def report_failure(
         with httpx.Client() as client:
             response = client.post(
                 url,
-                json={"body": f"Review failed: {error}"},
+                json={"body": f"Review failed: {error}", "success": False},
                 headers=headers,
                 timeout=30.0,
             )

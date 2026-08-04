@@ -11,6 +11,7 @@ restarts. A background sweep reclaims orphaned pods and Secrets.
 import asyncio
 import base64
 import logging
+import shlex
 import time
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -63,7 +64,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_MODEL": settings.model,
         "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
         "HERMIT_OPCODE_BIN": opencode_bin,
-        "HERMIT_OPCODE_ARGS": " ".join(settings.opencode_args),
+        "HERMIT_OPCODE_ARGS": shlex.join(settings.opencode_args),
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,
     }
@@ -108,6 +109,14 @@ class PodSpawner(ABC):
     @abstractmethod
     async def sweep(self) -> None:
         """Reclaim finished or stale reviewer pods and their secrets."""
+
+    @abstractmethod
+    async def get_pod_phase(self, job_id: str) -> str | None:
+        """Return the pod phase for ``job_id`` or ``None`` if the pod is gone."""
+
+    @abstractmethod
+    async def list_active_job_ids(self) -> list[str]:
+        """Return the job IDs of all pods with a non-terminal phase."""
 
     async def aclose(self) -> None:
         """Release any resources held by the spawner."""
@@ -164,6 +173,17 @@ class FakePodSpawner(PodSpawner):
     async def sweep(self) -> None:
         """Nothing to reclaim in the fake spawner."""
 
+    async def get_pod_phase(self, job_id: str) -> str | None:
+        """Return the pod phase for ``job_id``."""
+        job = self.jobs.get(job_id)
+        if job is None:
+            return None
+        return "Running" if job.status == "pending" else "Succeeded"
+
+    async def list_active_job_ids(self) -> list[str]:
+        """Return the job IDs of all non-terminal pods."""
+        return list(self.jobs.keys())
+
 
 class K8sPodSpawner(PodSpawner):
     """Spawns reviewer pods through the Kubernetes API in-cluster."""
@@ -171,6 +191,7 @@ class K8sPodSpawner(PodSpawner):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client: Optional[object] = None
+        self._cached_namespace: Optional[str] = None
 
     def _api(self) -> object:
         """Return a lazily configured CoreV1Api client."""
@@ -182,19 +203,27 @@ class K8sPodSpawner(PodSpawner):
             kubernetes.config.load_kube_config(config_file=self._settings.kube_config)
         else:
             kubernetes.config.load_incluster_config()
-        self._client = kubernetes.client.CoreV1Api()
+        client = kubernetes.client.CoreV1Api()
+        client.api_client.rest_client.pool_manager.connection_pool_kw.setdefault(
+            "timeout", 30.0
+        )
+        self._client = client
         return self._client
 
     def _namespace(self) -> str:
         """Return the namespace for pods, defaulting to the in-cluster one."""
         if self._settings.pod_namespace:
             return self._settings.pod_namespace
+        if self._cached_namespace is not None:
+            return self._cached_namespace
         path = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
         try:
             with open(path, "r", encoding="utf-8") as handle:
-                return handle.read().strip()
+                self._cached_namespace = handle.read().strip()
+                return self._cached_namespace
         except OSError:
-            return "default"
+            self._cached_namespace = "default"
+            return self._cached_namespace
 
     @staticmethod
     def _pod_name(job_id: str) -> str:
@@ -539,7 +568,14 @@ class K8sPodSpawner(PodSpawner):
         api = self._api()
         namespace = self._namespace()
         name = self._secret_name(job_id)
-        secret = await asyncio.to_thread(api.read_namespaced_secret, name, namespace)
+        try:
+            secret = await asyncio.to_thread(
+                api.read_namespaced_secret, name, namespace
+            )
+        except kubernetes.client.ApiException as exc:
+            if exc.status == 404:
+                return False
+            raise
         annotations = dict(secret.metadata.annotations or {})
         if annotations.get(STATUS_ANNOTATION) == "posted":
             return False
@@ -573,6 +609,44 @@ class K8sPodSpawner(PodSpawner):
         except Exception:  # pylint: disable=broad-exception-caught
             logger.debug("could not mark job %s failed", job_id)
 
+    async def get_pod_phase(self, job_id: str) -> str | None:
+        """Return the pod phase for ``job_id`` or ``None`` if the pod is gone."""
+        api = self._api()
+        namespace = self._namespace()
+        name = self._pod_name(job_id)
+        try:
+            pod = await asyncio.to_thread(api.read_namespaced_pod, name, namespace)
+            return (pod.status or object()).phase
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+
+    async def list_active_job_ids(self) -> list[str]:
+        """Return the job IDs of all reviewer pods that are still active."""
+        api = self._api()
+        namespace = self._namespace()
+        try:
+            pods = await asyncio.to_thread(
+                api.list_namespaced_pod,
+                namespace,
+                label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            return []
+        active = []
+        for pod in pods.items or []:
+            phase = (pod.status.phase or "") if pod.status else ""
+            if phase in ("Pending", "Running"):
+                job_id = (pod.metadata.labels or {}).get(JOB_LABEL_KEY)
+                if job_id:
+                    active.append(job_id)
+        return active
+
+    async def aclose(self) -> None:
+        """Close the Kubernetes client and release its connection pool."""
+        if self._client is not None:
+            self._client.api_client.close()
+            self._client = None
+
     async def sweep(self) -> None:
         """Reclaim finished or stale reviewer pods and orphaned Secrets."""
         api = self._api()
@@ -600,6 +674,11 @@ class K8sPodSpawner(PodSpawner):
             except Exception:  # pylint: disable=broad-exception-caught
                 logger.debug("could not delete pod %s", name)
             if job_id:
+                if (pod.status.phase or "") == "Failed":
+                    try:
+                        await self.mark_failed(job_id)
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        pass
                 try:
                     await asyncio.to_thread(
                         api.delete_namespaced_secret,

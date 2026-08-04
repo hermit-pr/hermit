@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import random
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -33,8 +34,20 @@ class GitClient(ABC):
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self._token = token
-        self._http = http or httpx.AsyncClient(
-            base_url=self.endpoint, headers=self.headers()
+        if http is not None:
+            self._http = http
+            return
+        verify: bool | str = True
+        for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+            cert_path = os.environ.get(env_var)
+            if cert_path and os.path.isfile(cert_path):
+                verify = cert_path
+                break
+        self._http = httpx.AsyncClient(
+            base_url=self.endpoint,
+            headers=self.headers(),
+            verify=verify,
+            follow_redirects=True,
         )
 
     @abstractmethod
