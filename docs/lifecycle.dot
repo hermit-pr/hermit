@@ -1,0 +1,27 @@
+digraph lifecycle {
+  rankdir=TB;
+  fontname="sans-serif";
+  fontsize=11;
+  labelloc="t";
+  label="H.E.R.M.I.T Review Lifecycle";
+  nodesep=0.4;
+  ranksep=0.5;
+
+  node [fontname="sans-serif", fontsize=10, shape=box, style="filled,rounded", margin="0.2,0.15"];
+  edge [fontname="sans-serif", fontsize=9];
+
+  /* Actors */
+  dev   [label="Developer"                      fillcolor="#e2efda" shape=plaintext fontsize=12];
+  git   [label="Git Host  (GitLab / GitHub)"    fillcolor="#4472C4" fontcolor=white];
+  master [label="Master  (FastAPI, K8s spawner)" fillcolor="#538135" fontcolor=white];
+  slave  [label="Slave Pod  (opencode, git)"     fillcolor="#bf8f00" fontcolor=white];
+  vllm   [label="vLLM Endpoint"                 fillcolor="#7030a0" fontcolor=white];
+
+  /* Flow */
+  dev -> git     [label="  0 · push + open PR/MR"   fontsize=9 penwidth=2];
+  git -> master  [label="  1 · webhook POST"        fontsize=9 penwidth=2];
+  master:w -> slave:w [label="  2 · create K8s Secret + Pod\n  (read token + report secret)" fontsize=8 penwidth=2];
+  slave:e -> vllm:e [label="  3 · opencode → vLLM\n  (clone, diff, review)" fontsize=8 penwidth=2 dir=both];
+  slave -> master [label="  4 · POST /internal/report/<id>\n  (HMAC per-job secret)" fontsize=8 penwidth=2];
+  master -> git  [label="  5 · POST review comment\n  (commit status: success)" fontsize=8 penwidth=2];
+}

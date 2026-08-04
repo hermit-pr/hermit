@@ -31,39 +31,7 @@ External systems:
 
 ## Review lifecycle
 
-```
- Dev                                     Git host
-  |  push + open PR / MR                    |
-  +---------------------------------------->|            (0)
-  |                                     webhook event     (1)
-  |<=====================================================> master
-  |                                         |
-  |     master validates signature,         |
-  |     builds ChangeEvent, creates a       |
-  |     job with a per-review secret        |
-  |                                         |
-  |     master creates a Kubernetes Secret  (read-only git token + report secret)
-  |     then a one-shot reviewer Pod        (2)
-  |                                         v
-  |                                   +-------------+
-  |                                   | slave pod   |
-  |                                   |-------------|
-  |                                   | git fetch   |  (3a)
-  |                                   | base..head  |
-  |                                   | diff        |
-  |                                   | opencode -> |  (3b)
-  |                                   | vLLM        |
-  |                                   | review text |
-  |                                   +-----+-------+
-  |                                         |
-  |                         POST /internal/report/<id>  (4)
-  |<=====================================================|
-  |     master stores the review body,       |
-  |     submits it to the PR/MR using the    |
-  |     scoped write token                   (5)
-  |---------------------------------------->|
-  |     review comment published             |
-```
+![Review Lifecycle](lifecycle.png)
 
 ### Step by step
 
