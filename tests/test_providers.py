@@ -245,6 +245,21 @@ async def test_github_check_membership_rejects_non_member() -> None:
 
 
 @pytest.mark.asyncio
+async def test_github_check_membership_handles_redirect() -> None:
+    """A 302 redirect (e.g. to login) is treated as not a member."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"Location": "https://git.example/login"})
+
+    client = GitHubClient("https://git.example", "token123", http=_http(handler))
+    try:
+        member = await client.check_membership("acme", "mallory")
+    finally:
+        await client.aclose()
+    assert member is False
+
+
+@pytest.mark.asyncio
 async def test_github_set_commit_status() -> None:
     """GitHub commit statuses are posted to the statuses endpoint."""
     event = ChangeEvent(

@@ -76,7 +76,7 @@ class GitHubClient(GitClient):
         """Return True when ``username`` is a member of ``org``."""
         path = f"/orgs/{org}/members/{username}"
         response = await self._request("GET", path)
-        if response.status_code == 404:
+        if response.status_code in (302, 404):
             return False
         response.raise_for_status()
         return True
