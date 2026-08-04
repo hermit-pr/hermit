@@ -40,6 +40,12 @@ BOT_MENTION = "@hermit"
 WATCH_POLL_SECONDS = 5.0
 
 
+async def _drain_body(receive: Receive, message: dict) -> None:
+    """Read remaining ASGI body chunks after rejecting a request."""
+    while message.get("more_body", False):
+        message = await receive()
+
+
 class _BodyLimitMiddleware:
     """ASGI middleware that rejects request bodies exceeding *max_bytes*.
 
@@ -57,18 +63,23 @@ class _BodyLimitMiddleware:
             return
         max_bytes = self._max_bytes
         consumed = 0
+        rejected = False
 
         async def limited_receive() -> dict:
-            nonlocal consumed
+            nonlocal consumed, rejected
+            if rejected:
+                await receive()
+                return {"type": "http.disconnect"}
             message = await receive()
-            if message["type"] == "http.request":
-                consumed += len(message.get("body", b""))
-                if consumed > max_bytes:
-                    response = JSONResponse(
-                        {"error": "payload too large"}, status_code=413
-                    )
-                    await response(scope, receive, send)
-                    return {"type": "http.disconnect"}
+            if message["type"] != "http.request":
+                return message
+            consumed += len(message.get("body", b""))
+            if consumed > max_bytes:
+                rejected = True
+                response = JSONResponse({"error": "payload too large"}, status_code=413)
+                await response(scope, receive, send)
+                _drain_body(receive, message)
+                return {"type": "http.disconnect"}
             return message
 
         await self._app(scope, limited_receive, send)

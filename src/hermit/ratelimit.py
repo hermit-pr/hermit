@@ -34,7 +34,7 @@ class RateLimiter:
         if self._trust_xff:
             forwarded = request.headers.get("x-forwarded-for")
             if forwarded:
-                return forwarded.split(",")[-1].strip()
+                return forwarded.split(",")[0].strip()
         if request.client is not None:
             return request.client.host
         return "unknown"

@@ -63,6 +63,10 @@ async def run_review(settings: SlaveSettings) -> str:
         head_source_url=head_source_url,
         env=env,
     )
+    try:
+        os.remove(askpass_path)
+    except OSError:
+        pass
     if not diff.strip():
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
@@ -85,6 +89,7 @@ async def run_review(settings: SlaveSettings) -> str:
         pr_body=settings.pr_body,
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
+        policy_extract_path=policy_path,
     )
     runner = OpenCodeRunner(
         settings.opencode_bin,

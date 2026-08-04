@@ -84,5 +84,12 @@ class GitLabClient(GitClient):
         response = await self._request("GET", path)
         if response.status_code == 404:
             return False
-        response.raise_for_status()
-        return True
+        if response.status_code == 200:
+            return True
+        logger.warning(
+            "GitLab membership check returned %d for %s/%s; assuming non-member",
+            response.status_code,
+            org,
+            username,
+        )
+        return False

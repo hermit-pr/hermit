@@ -177,7 +177,8 @@ def clone_and_diff(
                 "add",
                 "head-source",
                 head_source_url,
-            ]
+            ],
+            env=env,
         )
         _run(
             [

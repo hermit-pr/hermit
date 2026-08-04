@@ -38,7 +38,7 @@ class GitClient(ABC):
             self._http = http
             return
         verify: bool | str = True
-        for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
             cert_path = os.environ.get(env_var)
             if cert_path and os.path.isfile(cert_path):
                 verify = cert_path
