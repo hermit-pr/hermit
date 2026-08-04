@@ -6,6 +6,8 @@ import os
 import signal
 import sys
 
+import httpx
+
 from hermit import __version__
 from hermit.config import SlaveSettings
 from hermit.git import (
@@ -129,8 +131,7 @@ def _handle_signal(signum: int, _frame: object) -> None:
     logger.warning("received signal %d, reporting failure", signum)
     try:
         settings = SlaveSettings()
-    except Exception:  # pylint: disable=broad-exception-caught
-        # Signal handler — must never crash the process
+    except (OSError, ValueError):
         logger.warning("cannot load settings in signal handler, exiting")
         sys.exit(1)
     report_failure(
@@ -149,7 +150,6 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     try:
         asyncio.run(run_review(SlaveSettings()))
-    except Exception:  # pylint: disable=broad-exception-caught
-        # Process entrypoint — catch all for clean exit code
+    except (RuntimeError, ValueError, OSError, httpx.HTTPError):
         logger.exception("review failed")
         raise SystemExit(1) from None

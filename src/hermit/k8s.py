@@ -694,14 +694,13 @@ class K8sPodSpawner(PodSpawner):
             self._client.api_client.close()
             self._client = None
 
-    # pylint: disable=too-many-locals,too-many-branches
-    async def sweep(self) -> None:
-        """Reclaim finished or stale reviewer pods and orphaned Secrets."""
-
-        api = self._api()
-        namespace = self._namespace()
-        cutoff = time.time() - self._settings.report_timeout_seconds
-        secret_cutoff = time.time() - self._settings.abandoned_job_timeout_seconds
+    async def _sweep_pods(
+        self,
+        api: object,
+        namespace: str,
+        cutoff: float,
+    ) -> None:
+        """Delete finished or stale reviewer pods and their secrets."""
         try:
             pods = await asyncio.to_thread(
                 api.list_namespaced_pod,
@@ -753,6 +752,14 @@ class K8sPodSpawner(PodSpawner):
                         job_id,
                         exc.status,
                     )
+
+    async def _sweep_secrets(
+        self,
+        api: object,
+        namespace: str,
+        cutoff: float,
+    ) -> None:
+        """Delete orphaned secrets with no associated reviewer pod."""
         try:
             secrets = await asyncio.to_thread(
                 api.list_namespaced_secret,
@@ -769,10 +776,12 @@ class K8sPodSpawner(PodSpawner):
             return
         for secret in secrets.items or []:
             created = secret.metadata.creation_timestamp
-            if created is not None and created.timestamp() < secret_cutoff:
+            if created is not None and created.timestamp() < cutoff:
                 try:
                     await asyncio.to_thread(
-                        api.delete_namespaced_secret, secret.metadata.name, namespace
+                        api.delete_namespaced_secret,
+                        secret.metadata.name,
+                        namespace,
                     )
                 except kubernetes.client.ApiException as exc:
                     level = logging.DEBUG if exc.status == 404 else logging.WARNING
@@ -782,6 +791,15 @@ class K8sPodSpawner(PodSpawner):
                         secret.metadata.name,
                         exc.status,
                     )
+
+    async def sweep(self) -> None:
+        """Reclaim finished or stale reviewer pods and orphaned Secrets."""
+        api = self._api()
+        namespace = self._namespace()
+        pod_cutoff = time.time() - self._settings.report_timeout_seconds
+        secret_cutoff = time.time() - self._settings.abandoned_job_timeout_seconds
+        await self._sweep_pods(api, namespace, pod_cutoff)
+        await self._sweep_secrets(api, namespace, secret_cutoff)
 
 
 def build_spawner(settings: Settings) -> PodSpawner:

@@ -579,11 +579,113 @@ async def _recover_watchers(
         logger.info("recovered watcher for job %s after restart", job_id)
 
 
-# pylint: disable=too-many-locals, too-many-statements
-# FastAPI app factories are inherently large when wiring routes, middleware,
-# lifespan, and dependency injection in a single function.  The local count
-# and statement count reflect nested endpoint handlers that cannot be trivially
-# extracted without passing 8+ captured closures as explicit parameters.
+async def _handle_report(
+    job_id: str,
+    request: Request,
+    store: JobStore,
+    spawner: PodSpawner,
+    client: GitClient,
+) -> JSONResponse:
+    """Process a review report from a slave pod.
+
+    Stateless: reads the job from the durable K8s store so any replica can
+    serve the report.  Employs CAS (mark_posted) before posting to ensure
+    at-most-once delivery.
+    """
+    # Resolve job
+    local = await store.get(job_id)
+    job = local or await spawner.get_job(job_id)
+    if job is None:
+        logger.warning("report for unknown job %s", job_id)
+        return JSONResponse({"error": "unknown job"}, status_code=404)
+    # Authenticate
+    provided = request.headers.get("x-hermit-report-secret", "")
+    if not hmac.compare_digest(provided, job.report_secret):
+        logger.warning("rejected report for job %s (invalid secret)", job_id)
+        return JSONResponse({"error": "invalid report secret"}, status_code=401)
+    if job.status == "posted":
+        logger.info("report for job %s already posted; ignoring", job_id)
+        return JSONResponse({"status": "ok"}, status_code=200)
+    # Parse body
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+    body = payload.get("body", "")
+    success = payload.get("success", True)
+    if not success:
+        return await _handle_report_failure(job, job_id, body, spawner, client)
+
+    return await _post_review(job, job_id, body, spawner, client)
+
+
+async def _post_review(
+    job: ReviewJob,
+    job_id: str,
+    body: str,
+    spawner: PodSpawner,
+    client: GitClient,
+) -> JSONResponse:
+    """Post the review body to the PR/MR and set commit status."""
+    if not body.strip():
+        logger.warning("rejected empty review body for job %s", job_id)
+        return JSONResponse({"error": "empty review body"}, status_code=400)
+    if not await spawner.mark_posted(job_id):
+        logger.info("job %s was already posted by another replica", job_id)
+        return JSONResponse({"status": "ok"}, status_code=200)
+    try:
+        await client.post_review(job.event, body)
+    except httpx.HTTPError:
+        logger.exception(
+            "failed to submit review for %s %s#%s",
+            job.event.provider,
+            job.event.repo,
+            job.event.ref,
+        )
+        try:
+            await client.set_commit_status(
+                job.event,
+                "failure",
+                description="Review submission failed.",
+                context="hermit/review",
+            )
+        except httpx.HTTPError:
+            logger.warning(
+                "failed to set failure status for %s#%s",
+                job.event.repo,
+                job.event.ref,
+            )
+        job.status = "failed"
+        job.error = "review submission failed"
+        job.reported.set()
+        try:
+            await spawner.mark_failed(job_id)
+        except K8sApiError:
+            logger.debug("could not mark durable state failed for %s", job_id)
+        return JSONResponse({"error": "review submission failed"}, status_code=502)
+    job.body = body
+    job.status = "posted"
+    job.reported.set()
+    try:
+        await client.set_commit_status(
+            job.event,
+            "success",
+            description="Review completed.",
+            context="hermit/review",
+        )
+    except httpx.HTTPError:
+        logger.warning(
+            "failed to set success status for %s#%s",
+            job.event.repo,
+            job.event.ref,
+        )
+    await spawner.cleanup(job)
+    logger.info(
+        "received review from slave PR #%s repo %s",
+        job.event.ref,
+        job.event.repo,
+    )
+    return JSONResponse({"status": "ok"}, status_code=200)
 
 
 def create_app(
@@ -604,7 +706,7 @@ def create_app(
 
     def track(job: ReviewJob) -> None:
         """Schedule the review watch for a spawned job."""
-        timeout = job.recovery_timeout or settings.report_timeout_seconds
+        timeout = getattr(job, "recovery_timeout", None) or settings.report_timeout_seconds
         task = asyncio.create_task(_watch_job(job, spawner, store, timeout, client))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
@@ -697,96 +799,11 @@ def create_app(
         except PermissionError as exc:
             return JSONResponse({"error": str(exc)}, status_code=403)
 
-    # pylint: disable=too-many-return-statements
     @app.post("/internal/report/{job_id}")
     async def report(job_id: str, request: Request) -> JSONResponse:
-        """Receive a review from a reviewer pod and submit it to the PR/MR.
-
-        The handler is stateless: it reads the job record from Kubernetes, so
-        any replica can serve a report, including after a master restart. A
-        ``posted`` status makes the endpoint idempotent.  The CAS (mark_posted)
-        is performed *before* posting the review to prevent duplicate comments.
-        """
+        """Receive a review from a reviewer pod and submit it to the PR/MR."""
         if not limiter.allow(request):
             return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
-        local = await store.get(job_id)
-        job = local or await spawner.get_job(job_id)
-        if job is None:
-            logger.warning("report for unknown job %s", job_id)
-            return JSONResponse({"error": "unknown job"}, status_code=404)
-        provided = request.headers.get("x-hermit-report-secret", "")
-        if not hmac.compare_digest(provided, job.report_secret):
-            logger.warning("rejected report for job %s (invalid secret)", job_id)
-            return JSONResponse({"error": "invalid report secret"}, status_code=401)
-        if job.status == "posted":
-            logger.info("report for job %s already posted; ignoring", job_id)
-            return JSONResponse({"status": "ok"}, status_code=200)
-        try:
-            payload = await request.json()
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-        body = payload.get("body", "")
-        success = payload.get("success", True)
-        if not success:
-            return await _handle_report_failure(job, job_id, body, spawner, client)
-        if not body.strip():
-            logger.warning("rejected empty review body for job %s", job_id)
-            return JSONResponse({"error": "empty review body"}, status_code=400)
-        if not await spawner.mark_posted(job_id):
-            logger.info("job %s was already posted by another replica", job_id)
-            return JSONResponse({"status": "ok"}, status_code=200)
-        try:
-            await client.post_review(job.event, body)
-        except httpx.HTTPError:
-            logger.exception(
-                "failed to submit review for %s %s#%s",
-                job.event.provider,
-                job.event.repo,
-                job.event.ref,
-            )
-            try:
-                await client.set_commit_status(
-                    job.event,
-                    "failure",
-                    description="Review submission failed.",
-                    context="hermit/review",
-                )
-            except httpx.HTTPError:
-                logger.warning(
-                    "failed to set failure status for %s#%s",
-                    job.event.repo,
-                    job.event.ref,
-                )
-            job.status = "failed"
-            job.error = "review submission failed"
-            job.reported.set()
-            try:
-                await spawner.mark_failed(job_id)
-            except K8sApiError:
-                logger.debug("could not mark durable state failed for %s", job_id)
-            return JSONResponse({"error": "review submission failed"}, status_code=502)
-        job.body = body
-        job.status = "posted"
-        job.reported.set()
-        try:
-            await client.set_commit_status(
-                job.event,
-                "success",
-                description="Review completed.",
-                context="hermit/review",
-            )
-        except httpx.HTTPError:
-            logger.warning(
-                "failed to set success status for %s#%s",
-                job.event.repo,
-                job.event.ref,
-            )
-        await spawner.cleanup(job)
-        logger.info(
-            "received review from slave PR #%s repo %s",
-            job.event.ref,
-            job.event.repo,
-        )
-        return JSONResponse({"status": "ok"}, status_code=200)
+        return await _handle_report(job_id, request, store, spawner, client)
 
     return app

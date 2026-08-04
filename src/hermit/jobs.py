@@ -36,8 +36,6 @@ def compute_job_id(event: ChangeEvent, signing_key: str) -> str:
 class ReviewJob:
     """A single review in flight, tracked by the master."""
 
-    # pylint: disable=too-many-instance-attributes
-
     id: str
     event: ChangeEvent
     report_secret: str
@@ -47,7 +45,6 @@ class ReviewJob:
     body: Optional[str] = None
     error: Optional[str] = None
     started_at: Optional[float] = None
-    recovery_timeout: Optional[float] = None
     reported: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
 
