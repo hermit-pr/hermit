@@ -64,4 +64,4 @@ def report_failure(
             )
             logger.debug("failure report returned status %d", response.status_code)
     except httpx.HTTPError:
-        logger.debug("could not report failure for job %s", job_id)
+        logger.warning("could not report failure for job %s", job_id)

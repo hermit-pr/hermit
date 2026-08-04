@@ -241,6 +241,7 @@ def extract_policy(
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     if result.returncode != 0:
         return False
