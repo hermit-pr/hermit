@@ -109,6 +109,41 @@ def test_opencode_environment_pins_config_for_antismuggling() -> None:
         assert env["OPENCODE_CONFIG_DIR"] == tmp
 
 
+def test_opencode_environment_sets_airgap_flags() -> None:
+    """The opencode process gets OPENCODE_DISABLE_* flags for airgap safety."""
+    with tempfile.TemporaryDirectory() as tmp:
+        runner = OpenCodeRunner(
+            bin_path="opencode",
+            args=["run"],
+            endpoint="http://vllm.example:8000/v1",
+            model="llama-3.1-8b-instruct",
+            workspace=tmp,
+        )
+        env = runner._environment()  # pylint: disable=protected-access
+        assert env["OPENCODE_DISABLE_AUTOUPDATE"] == "1"
+        assert env["OPENCODE_DISABLE_MODELS_FETCH"] == "1"
+        assert env["OPENCODE_DISABLE_DEFAULT_PLUGINS"] == "1"
+        assert env["OPENCODE_DISABLE_LSP_DOWNLOAD"] == "1"
+
+
+def test_opencode_config_restricts_providers_for_airgap() -> None:
+    """The generated config only enables the vllm provider."""
+    config = _run({})
+    assert config["enabled_providers"] == ["vllm"]
+
+
+def test_opencode_config_disables_autoupdate() -> None:
+    """The generated config explicitly disables autoupdate."""
+    config = _run({})
+    assert config["autoupdate"] is False
+
+
+def test_opencode_config_disables_sharing() -> None:
+    """The generated config explicitly disables session sharing."""
+    config = _run({})
+    assert config["share"] == "disabled"
+
+
 def test_extract_text_accumulates_fragments_by_message() -> None:
     """NDJSON text fragments of the last message are concatenated."""
     stdout = "\n".join(

@@ -101,6 +101,11 @@ class OpenCodeRunner:
 
         The permission block forbids any mutating shell command so that a
         review can only inspect the repository, never change it.
+
+        Airgap safety: ``enabled_providers`` restricts opencode to only load
+        the vLLM provider, preventing initialization of built-in providers
+        that may attempt outbound connections. ``autoupdate`` and ``share``
+        are explicitly disabled as defense-in-depth.
         """
         options: dict[str, object] = {"baseURL": self._endpoint}
         if self._api_key:
@@ -108,6 +113,9 @@ class OpenCodeRunner:
         config: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "model": f"vllm/{self._model}",
+            "autoupdate": False,
+            "share": "disabled",
+            "enabled_providers": ["vllm"],
             "permission": {
                 "deny": DENIED_PERMISSIONS,
                 "allow": ALLOWED_PERMISSIONS,
@@ -131,6 +139,10 @@ class OpenCodeRunner:
         ``OPENCODE_CONFIG`` pins the generated config file so a repository
         that ships its own ``opencode.json`` cannot override the vLLM endpoint
         (prompt injection via config smuggling).
+
+        Airgap safety: several ``OPENCODE_DISABLE_*`` flags are set to prevent
+        opencode from making outbound calls to models.dev, npm registries,
+        update servers, or telemetry endpoints.
         """
         env = os.environ.copy()
         env.update(self._extra_env)
@@ -139,6 +151,10 @@ class OpenCodeRunner:
         config_path = Path(self._workspace) / "opencode.json"
         env["OPENCODE_CONFIG"] = str(config_path)
         env["OPENCODE_CONFIG_DIR"] = self._workspace
+        env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+        env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"
+        env["OPENCODE_DISABLE_DEFAULT_PLUGINS"] = "1"
+        env["OPENCODE_DISABLE_LSP_DOWNLOAD"] = "1"
         if self._api_key:
             env["VLLM_API_KEY"] = self._api_key
         return env
