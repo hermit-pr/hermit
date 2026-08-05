@@ -147,12 +147,12 @@ The `docker-build` pipeline job builds the image and pushes it to your GitLab Co
 - every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
 - tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
 
-The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.1.0`), so the versioned image is used automatically.
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.1.1`), so the versioned image is used automatically.
 
 For example:
 
 ```sh
-docker pull registry.gitlab.com/hermit-bot/hermit:0.1.0
+docker pull registry.gitlab.com/hermit-bot/hermit:0.1.1
 ```
 
 Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (this repo is `registry.gitlab.com/hermit-bot/hermit`).
@@ -187,7 +187,7 @@ The `helm-package` pipeline job packages the chart and pushes it to
 ```sh
 helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --set image.repository=registry.gitlab.com/hermit-bot/hermit \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com \
@@ -262,7 +262,7 @@ takes precedence when both `configMap` and `secret` are set.
 kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
 
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --set ... \
   --set caBundle.configMap=ca-bundle-cm \
   --set caBundle.configMapKey=ca.pem
@@ -275,7 +275,7 @@ Point GitLab/GitHub webhooks at the master Service (`http://<release-name>-hermi
 ### 5. Verify
 
 - `kubectl get pods` — the master should be `Running`.
-- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.1.0"}`.
+- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.1.1"}`.
 - Open a PR/MR or write `@hermit` in a comment: a reviewer pod is spawned and a review is posted.
 
 ## Running locally
@@ -309,7 +309,7 @@ HERMIT_POD_SPAWNER=fake \
 
 ## Status
 
-**v0.1.0 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
+**v0.1.1 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
 
 ## License
 

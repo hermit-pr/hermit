@@ -47,7 +47,7 @@ class GitClient(ABC):
             base_url=self.endpoint,
             headers=self.headers(),
             verify=verify,
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
     @abstractmethod

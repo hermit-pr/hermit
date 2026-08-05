@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-05
+
+### Fixed
+
+- GitHub Enterprise membership and collaborator checks returning false negatives
+  (403 Forbidden for all `@hermit` comments). The root cause was
+  `follow_redirects=True` in the `GitClient` base class, which caused `httpx` to
+  silently follow 302 redirects from GHE's `/orgs/<org>/members/<user>` and
+  `/repos/<owner>/<repo>/collaborators/<user>` endpoints to `/login`, consuming
+  the redirect before the explicit 302/403 handling in `github.py` could
+  interpret it. The `GitClient` now creates the `AsyncClient` with
+  `follow_redirects=False`, restoring the expected behaviour.
+
 ## [0.1.0] - 2026-08-04
 
 First release of H.E.R.M.I.T, the airgapped code-review bot for on-premise
@@ -107,5 +120,6 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...main
+[0.1.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...v0.1.1
 [0.1.0]: https://gitlab.com/hermit-bot/hermit/-/tags/v0.1.0
