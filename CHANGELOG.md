@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-05
+
+### Fixed
+
+- Reviewer pod stalled indefinitely because ``--agent hermit-reviewer`` CLI
+  flag interacted badly with opencode's ``run`` mode. The agent is now
+  activated via the ``default_agent`` config key in ``opencode.json``
+  instead of the CLI flag. The ``default_agent`` key applies across all
+  opencode interfaces including ``run``, TUI, and GitHub Actions.
+
 ## [0.2.4] - 2026-08-05
 
 ### Fixed
@@ -227,7 +237,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...main
+[0.2.5]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...v0.2.5
 [0.2.4]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...v0.2.4
 [0.2.3]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.2...v0.2.3
 [0.2.2]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...v0.2.2

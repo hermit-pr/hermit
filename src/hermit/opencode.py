@@ -114,6 +114,7 @@ class OpenCodeRunner:
         config: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "model": f"vllm/{self._model}",
+            "default_agent": "hermit-reviewer",
             "autoupdate": False,
             "share": "disabled",
             "enabled_providers": ["vllm"],
@@ -215,19 +216,9 @@ class OpenCodeRunner:
         self._write_config()
         prompt_path = Path(self._workspace) / "review-prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
-        command = [
-            self._bin,
-            "run",
-            "--auto",
-            "--agent",
-            "hermit-reviewer",
-            "--format",
-            "json",
-            str(prompt_path),
-        ]
+        command = [self._bin, "run", "--auto", "--format", "json", str(prompt_path)]
         logger.info(
-            "running opencode %s run --auto --agent hermit-reviewer --format json "
-            "(model=%s)",
+            "running opencode %s run --auto --format json (model=%s)",
             self._bin,
             self._model,
         )
