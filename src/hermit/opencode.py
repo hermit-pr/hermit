@@ -264,6 +264,8 @@ class OpenCodeRunner:
             await process.wait()
             raise RuntimeError(f"opencode timed out after {self._timeout}s") from None
         logger.debug("opencode exited with %d", process.returncode)
+        if stderr:
+            logger.info("opencode stderr: %s", stderr.decode())
         if process.returncode != 0:
             message = stderr.decode().strip()
             logger.error("opencode failed: %s", message)
