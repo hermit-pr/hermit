@@ -46,15 +46,12 @@ def test_build_review_prompt_includes_rules_and_diff() -> None:
         pr_title="Add endpoint",
         pr_body="Implements the missing endpoint.",
     )
-    assert "You are H.E.R.M.I.T, a code reviewer" in prompt
+    assert "Review this github pull request" in prompt
     assert "git diff base-sha" in prompt
-    assert "acme/app PR 42" in prompt
+    assert "acme/app #42" in prompt
+    assert "Add endpoint" in prompt
     assert "## Critical changes\n" in prompt
     assert "+code" in prompt
-    assert "GitHub-flavored Markdown" in prompt
-    assert "<pr_title>" in prompt
-    assert "Add endpoint" in prompt
-    assert "<pr_description>" in prompt
     assert "Implements the missing endpoint." in prompt
 
 
@@ -104,7 +101,7 @@ def test_build_review_prompt_includes_secret_candidates() -> None:
         "+code",
         secret_candidates=["GitHub Token: ghp_abcdefghijklmnopqrstuvwxyz123456"],
     )
-    assert "secret_candidates" in prompt
+    assert "Secret scan candidates" in prompt
     assert "GitHub Token" in prompt
     assert "TRUE POSITIVE" in prompt
 
