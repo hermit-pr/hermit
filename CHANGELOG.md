@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-08-06
+
+### Added
+
+- Completed job retention: the master no longer deletes reviewer pods
+  immediately after posting a review. Pods stay for 15 minutes (configurable
+  via ``COMPLETED_RETENTION``), then a background GC task running every 5
+  minutes cleans them up. This gives operators time to inspect pod logs for
+  debugging.
+- OpenCode internal log file (``~/.local/share/opencode/log/opencode.log``)
+  is read and logged to the pod's stdout after the process exits, providing
+  visibility even when ``--print-logs`` does not redirect to stderr.
+- Raw NDJSON output from opencode is logged to the pod's stdout before
+  parsing, giving full visibility into the model's output stream.
+- ``: Refactored ``DEFAULT_REVIEW_RULES`` to use a fill-in template format
+  with explicit section placeholders and clear instructions to suppress
+  preamble and meta-commentary.
+
+### Changed
+
+- Job status renamed from "posted" to "completed" everywhere (Kubernetes
+  annotation, durable secret, in-memory status, tests).
+- ``_watch_job()`` no longer deletes the pod in its ``finally`` block; only
+  removes the job from the in-memory store.
+
+### Fixed
+
+- DeepSeek reasoning/thinking blocks (``<thinking>...</thinking>``) are now
+  stripped from the extracted review text via a regex substitution in
+  ``extract_text()``. This prevents thinking content from being posted as
+  part of the review on on-premise vLLM/LiteLLM deployments.
+- Conversational preamble ("Let me check...", "Looking at this PR...") is
+  stripped from the review body before posting. The output is truncated to
+  the first ``## `` heading line, removing all preliminary meta-commentary.
+
 ## [0.2.7] - 2026-08-06
 
 ### Fixed
@@ -284,7 +319,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.7...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.8...main
+[0.2.8]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.7...v0.2.8
 [0.2.7]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...v0.2.7
 [0.2.6]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...v0.2.6
 [0.2.5]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...v0.2.5

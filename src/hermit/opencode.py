@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -81,7 +82,9 @@ def extract_text(stdout: str) -> str:
         messages.setdefault(str(message_id), []).append(text)
     if not messages:
         raise RuntimeError("opencode produced no text output")
-    return "".join(messages[list(messages)[-1]]).strip()
+    result = "".join(messages[list(messages)[-1]]).strip()
+    result = re.sub(r"<thinking>.*?</thinking>", "", result, flags=re.DOTALL).strip()
+    return result
 
 
 class OpenCodeRunner:
@@ -268,4 +271,20 @@ class OpenCodeRunner:
                 f"opencode failed with exit {process.returncode}: {message}"
             )
         logger.info("opencode completed; output %d bytes", len(stdout))
-        return extract_text(stdout.decode("utf-8"))
+        raw = stdout.decode("utf-8")
+        logger.info("opencode raw output (%d bytes)\n%s", len(raw), raw[-8000:])
+        try:
+            log_path = os.path.join(
+                os.path.expanduser("~"),
+                ".local",
+                "share",
+                "opencode",
+                "log",
+                "opencode.log",
+            )
+            if os.path.isfile(log_path):
+                with open(log_path, encoding="utf-8") as lf:
+                    logger.info("opencode internal log:\n%s", lf.read()[-8000:])
+        except OSError:
+            pass
+        return extract_text(raw)

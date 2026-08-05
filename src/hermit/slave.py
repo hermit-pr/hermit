@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import signal
 import sys
 
@@ -111,6 +112,10 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
+    logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
+    match = re.search(r"^##\s+", output, re.MULTILINE)
+    if match:
+        output = output[match.start() :]
     header = (
         f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
     )
