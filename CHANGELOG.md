@@ -7,6 +7,144 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-08-06
+
+### Added
+
+- Completed job retention: the master no longer deletes reviewer pods
+  immediately after posting a review. Pods stay for 15 minutes (configurable
+  via ``COMPLETED_RETENTION``), then a background GC task running every 5
+  minutes cleans them up. This gives operators time to inspect pod logs for
+  debugging.
+- OpenCode internal log file (``~/.local/share/opencode/log/opencode.log``)
+  is read and logged to the pod's stdout after the process exits, providing
+  visibility even when ``--print-logs`` does not redirect to stderr.
+- Raw NDJSON output from opencode is logged to the pod's stdout before
+  parsing, giving full visibility into the model's output stream.
+- ``: Refactored ``DEFAULT_REVIEW_RULES`` to use a fill-in template format
+  with explicit section placeholders and clear instructions to suppress
+  preamble and meta-commentary.
+
+### Changed
+
+- Job status renamed from "posted" to "completed" everywhere (Kubernetes
+  annotation, durable secret, in-memory status, tests).
+- ``_watch_job()`` no longer deletes the pod in its ``finally`` block; only
+  removes the job from the in-memory store.
+
+### Fixed
+
+- DeepSeek reasoning/thinking blocks (``<thinking>...</thinking>``) are now
+  stripped from the extracted review text via a regex substitution in
+  ``extract_text()``. This prevents thinking content from being posted as
+  part of the review on on-premise vLLM/LiteLLM deployments.
+- Conversational preamble ("Let me check...", "Looking at this PR...") is
+  stripped from the review body before posting. The output is truncated to
+  the first ``## `` heading line, removing all preliminary meta-commentary.
+
+## [0.2.7] - 2026-08-06
+
+### Fixed
+
+- Signal handler noise on successful review: the slave pod's SIGTERM handler
+  no longer POSTs a spurious failure report when the review was already sent.
+  Previously the master deleted the pod (via ``cleanup()``) immediately after
+  posting the review, causing a sequence of "received signal 15, reporting
+  failure" → "report for unknown job → 404" in both the slave and master logs.
+- Master log ordering: "received review from slave" now appears before
+  ``cleanup()``, so the log order reflects the actual event sequence.
+
+### Added
+
+- ``opencode run`` now uses ``--print-logs`` flag so opencode's internal logs
+  are emitted on stderr and captured by the pod's log collector. Previously
+  these were written to ``/home/hermit/.local/share/opencode/log/`` and lost
+  when the pod was deleted.
+
+## [0.2.6] - 2026-08-06
+
+### Fixed
+
+- Reviewer pod stalled because bash permissions had ``"*": "ask"``, which
+  deadlocked when opencode's built-in ``explore`` subagent tried to run
+  diagnostic commands like ``which rg``. The ``--auto`` flag should have
+  auto-approved asks but did not apply at the agent level.
+- ``*: deny`` is now the default for bash permissions. An explicit allow-list
+  gates every permitted command: git read-only operations, grep, find, cat,
+  head, tail, ls, wc, sort, uniq, cut, tr, echo, which, pwd, env, date,
+  printf, expr, test, true, false, dirname, basename, xargs, and read. Any
+  command not in the allow-list (rm, curl, apt, docker, kubectl, chmod, tee,
+  mv, mkdir, cp, kill, sudo, mount, etc.) is blocked.
+- Agent ``task`` permission set to ``{"*": "deny"}`` to prevent the
+  hermit-reviewer agent from spawning subagents (explore, general, scout)
+  entirely — their permission prompts were the root cause of the stalls.
+
+### Added
+
+- NetworkPolicy template (``slave-networkpolicy.yaml``) to restrict egress
+  from reviewer pods. When enabled via ``networkPolicy.enabled: true``,
+  reviewer pods can only reach: kube-dns (UDP/TCP 53), the configured git
+  host CIDR and port, the configured vLLM endpoint CIDR and port, and the
+  master pod in the same namespace. This prevents the opencode agent from
+  making outbound connections to any other destination, even if an allowed
+  bash command (e.g. ``curl``) were never explicitly denied in future code.
+
+## [0.2.5] - 2026-08-05
+
+### Fixed
+
+- Reviewer pod stalled indefinitely because ``--agent hermit-reviewer`` CLI
+  flag interacted badly with opencode's ``run`` mode. The agent is now
+  activated via the ``default_agent`` config key in ``opencode.json``
+  instead of the CLI flag. The ``default_agent`` key applies across all
+  opencode interfaces including ``run``, TUI, and GitHub Actions.
+
+## [0.2.4] - 2026-08-05
+
+### Fixed
+
+- ``hermit-reviewer`` agent stalled indefinitely on review tasks. Root cause
+  was ``mode: all`` (the agent wasn't primary) combined with
+  ``question: deny`` blocking the model from asking for clarification. Changed
+  to ``mode: primary`` and added ``recovery: deny`` to the agent's permission
+  block to prevent opencode from injecting stuck-detection prompts.
+
+## [0.2.3] - 2026-08-05
+
+### Fixed
+
+- ``hermit-reviewer`` agent used ``mode: subagent`` which prevented it from
+  being invoked directly via ``--agent``; changed to ``mode: all`` so opencode
+  could run it. (Later found ``primary`` was the correct mode.)
+
+## [0.2.2] - 2026-08-05
+
+### Changed
+
+- Review architecture redesigned around opencode agents: review rules, output
+  format, and evaluation criteria move from the user prompt into a dedicated
+  ``hermit-reviewer`` subagent defined in the generated ``opencode.json``
+  config. The agent's system prompt contains the trusted rules; the user prompt
+  carries only PR context data (title, description, diff, secret scan).
+- ``opencode`` invoked with ``--agent hermit-reviewer`` so the model receives a
+  single, consistent system-level identity instead of the conflicting "You are
+  H.E.R.M.I.T" persona that caused it to treat the prompt as a template
+  document rather than a review task.
+- Prompt file stripped to pure data — no review rules, no output format
+  instructions, no identity declaration. This eliminates the "would you like me
+  to execute this template?" meta-response observed with earlier prompt formats.
+- ``OpenCodeRunner`` accepts an optional ``review_rules`` parameter and merges
+  it with ``DEFAULT_REVIEW_RULES`` via a newline separator in the agent prompt.
+- ``DEFAULT_REVIEW_RULES`` no longer neutralized in the prompt — backticks and
+  markdown formatting are preserved because they live in the trusted system
+  prompt.
+
+### Removed
+
+- Two tests removed: ``test_build_review_prompt_always_includes_default_rules``
+  and ``test_build_review_prompt_neutralizes_custom_rules`` (rules are no longer
+  in the user prompt at all).
+
 ## [0.2.1] - 2026-08-05
 
 ### Added
@@ -181,7 +319,14 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.8...main
+[0.2.8]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.7...v0.2.8
+[0.2.7]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...v0.2.7
+[0.2.6]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...v0.2.6
+[0.2.5]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...v0.2.5
+[0.2.4]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...v0.2.4
+[0.2.3]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.2...v0.2.3
+[0.2.2]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...v0.2.2
 [0.2.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...v0.2.1
 [0.2.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...v0.2.0
 [0.1.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...v0.1.1

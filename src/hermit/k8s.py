@@ -170,10 +170,13 @@ class FakePodSpawner(PodSpawner):
         return self.jobs.get(job_id)
 
     async def mark_posted(self, job_id: str) -> bool:
-        """Mark the recorded job as posted."""
+        """Mark the recorded job as completed. Returns False if already completed."""
         job = self.jobs.get(job_id)
-        if job is not None:
-            job.status = "posted"
+        if job is None:
+            return False
+        if job.status == "completed":
+            return False
+        job.status = "completed"
         return True
 
     async def mark_failed(self, job_id: str) -> None:
@@ -542,6 +545,51 @@ class K8sPodSpawner(PodSpawner):
             except kubernetes.client.ApiException:
                 logger.debug("could not delete %s in %s", name, namespace)
 
+    async def cleanup_completed(self, older_than_seconds: int) -> None:
+        """Delete pods and secrets for completed jobs older than the cutoff."""
+        api = self._api()
+        namespace = self._namespace()
+        try:
+            pods = await asyncio.to_thread(
+                api.list_namespaced_pod,
+                namespace,
+                label_selector=f"{JOB_APP_LABEL}={JOB_APP_VALUE}",
+            )
+        except kubernetes.client.ApiException:
+            logger.debug("cleanup_completed: failed to list pods in %s", namespace)
+            return
+        cutoff = time.time() - older_than_seconds
+        for pod in pods.items or []:
+            annotations = pod.metadata.annotations or {}
+            if annotations.get(STATUS_ANNOTATION) != "completed":
+                continue
+            pod_time = pod.metadata.creation_timestamp
+            if pod_time and pod_time.timestamp() < cutoff:
+                job_id = (pod.metadata.labels or {}).get(JOB_LABEL_KEY)
+                if job_id:
+                    await self._delete_namespaced_pod(pod.metadata.name, namespace, api)
+                    await self._delete_namespaced_secret(
+                        self._secret_name(job_id), namespace, api
+                    )
+
+    async def _delete_namespaced_pod(
+        self, name: str, namespace: str, api: object
+    ) -> None:
+        try:
+            await asyncio.to_thread(api.delete_namespaced_pod, name, namespace)
+            logger.debug("deleted pod %s in %s", name, namespace)
+        except kubernetes.client.ApiException:
+            logger.debug("could not delete pod %s in %s", name, namespace)
+
+    async def _delete_namespaced_secret(
+        self, name: str, namespace: str, api: object
+    ) -> None:
+        try:
+            await asyncio.to_thread(api.delete_namespaced_secret, name, namespace)
+            logger.debug("deleted secret %s in %s", name, namespace)
+        except kubernetes.client.ApiException:
+            logger.debug("could not delete secret %s in %s", name, namespace)
+
     @staticmethod
     def _decode(data: dict[str, str], key: str) -> str:
         """Decode a base64 ``data`` entry of a Kubernetes Secret."""
@@ -582,7 +630,7 @@ class K8sPodSpawner(PodSpawner):
         )
 
     async def mark_posted(self, job_id: str) -> bool:
-        """Atomically flip the job status to ``posted`` using a CAS replace.
+        """Atomically flip the job status to ``completed`` using a CAS replace.
 
         Returns ``False`` when another replica changed the secret concurrently,
         meaning this replica must not publish the review a second time.
@@ -600,9 +648,9 @@ class K8sPodSpawner(PodSpawner):
                 return False
             raise
         annotations = dict(secret.metadata.annotations or {})
-        if annotations.get(STATUS_ANNOTATION) == "posted":
+        if annotations.get(STATUS_ANNOTATION) == "completed":
             return False
-        annotations[STATUS_ANNOTATION] = "posted"
+        annotations[STATUS_ANNOTATION] = "completed"
         secret.metadata.annotations = annotations
         try:
             await asyncio.to_thread(
@@ -615,10 +663,10 @@ class K8sPodSpawner(PodSpawner):
         return True
 
     async def mark_failed(self, job_id: str) -> None:
-        """Best-effort record that the review could not be posted.
+        """Best-effort record that the review could not be completed.
 
         Uses a replace with resource-version check (same CAS pattern as
-        mark_posted) so that a posted transition made concurrently
+        mark_posted) so that a completed transition made concurrently
         by another replica is never overwritten.
         """
         api = self._api()
@@ -633,7 +681,7 @@ class K8sPodSpawner(PodSpawner):
                 logger.debug("could not read secret for job %s", job_id)
             return
         annotations = dict(secret.metadata.annotations or {})
-        if annotations.get(STATUS_ANNOTATION) == "posted":
+        if annotations.get(STATUS_ANNOTATION) == "completed":
             return
         annotations[STATUS_ANNOTATION] = "failed"
         secret.metadata.annotations = annotations

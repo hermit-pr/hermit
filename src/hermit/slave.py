@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import signal
 import sys
 
@@ -111,6 +112,10 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
+    logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
+    match = re.search(r"^##\s+", output, re.MULTILINE)
+    if match:
+        output = output[match.start() :]
     header = (
         f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
     )
@@ -122,11 +127,17 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.report_secret.get_secret_value(),
         body,
     )
+    _review_posted[0] = True
     return body
+
+
+_review_posted = [False]
 
 
 def _handle_signal(signum: int, _frame: object) -> None:
     """Report a failure to the master before exiting on SIGTERM/SIGINT."""
+    if _review_posted[0]:
+        return
     logger.warning("received signal %d, reporting failure", signum)
     try:
         settings = SlaveSettings()

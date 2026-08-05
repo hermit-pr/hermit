@@ -3,4 +3,4 @@
 A configurable code review bot for on-premise GitLab and GitHub instances.
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.8"

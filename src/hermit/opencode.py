@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -12,25 +13,39 @@ from hermit.config import DEFAULT_REVIEW_RULES
 logger = logging.getLogger(__name__)
 
 BASH_PERMISSIONS: dict[str, str] = {
-    "*": "ask",
     "git diff*": "allow",
     "git log*": "allow",
-    "git status*": "allow",
     "git show*": "allow",
+    "git status*": "allow",
     "git branch*": "allow",
     "git fetch*": "allow",
     "git rev-parse*": "allow",
-    "ls*": "allow",
-    "cat*": "allow",
     "grep*": "allow",
     "find*": "allow",
+    "cat*": "allow",
+    "head*": "allow",
+    "tail*": "allow",
+    "ls*": "allow",
     "wc*": "allow",
+    "sort*": "allow",
+    "uniq*": "allow",
+    "cut*": "allow",
+    "tr*": "allow",
+    "echo*": "allow",
+    "which*": "allow",
+    "pwd*": "allow",
+    "env*": "allow",
+    "date*": "allow",
+    "printf*": "allow",
+    "expr*": "allow",
+    "test*": "allow",
+    "true*": "allow",
+    "false*": "allow",
+    "dirname*": "allow",
+    "basename*": "allow",
+    "xargs*": "allow",
     "read": "allow",
-    "git push*": "deny",
-    "git commit*": "deny",
-    "git remote*": "deny",
-    "git checkout -b*": "deny",
-    "git tag*": "deny",
+    "*": "deny",
 }
 
 
@@ -67,7 +82,9 @@ def extract_text(stdout: str) -> str:
         messages.setdefault(str(message_id), []).append(text)
     if not messages:
         raise RuntimeError("opencode produced no text output")
-    return "".join(messages[list(messages)[-1]]).strip()
+    result = "".join(messages[list(messages)[-1]]).strip()
+    result = re.sub(r"<thinking>.*?</thinking>", "", result, flags=re.DOTALL).strip()
+    return result
 
 
 class OpenCodeRunner:
@@ -114,6 +131,7 @@ class OpenCodeRunner:
         config: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "model": f"vllm/{self._model}",
+            "default_agent": "hermit-reviewer",
             "autoupdate": False,
             "share": "disabled",
             "enabled_providers": ["vllm"],
@@ -159,13 +177,15 @@ class OpenCodeRunner:
                         "evaluates pull requests for correctness, "
                         "security, and maintainability"
                     ),
-                    "mode": "subagent",
+                    "mode": "primary",
                     "temperature": 0.1,
                     "prompt": agent_prompt,
                     "permission": {
                         "edit": "deny",
                         "webfetch": "deny",
                         "question": "deny",
+                        "recovery": "deny",
+                        "task": {"*": "deny"},
                         "bash": BASH_PERMISSIONS,
                     },
                 }
@@ -218,15 +238,13 @@ class OpenCodeRunner:
             self._bin,
             "run",
             "--auto",
-            "--agent",
-            "hermit-reviewer",
+            "--print-logs",
             "--format",
             "json",
             str(prompt_path),
         ]
         logger.info(
-            "running opencode %s run --auto --agent hermit-reviewer --format json "
-            "(model=%s)",
+            "running opencode %s run --auto --print-logs --format json (model=%s)",
             self._bin,
             self._model,
         )
@@ -253,4 +271,20 @@ class OpenCodeRunner:
                 f"opencode failed with exit {process.returncode}: {message}"
             )
         logger.info("opencode completed; output %d bytes", len(stdout))
-        return extract_text(stdout.decode("utf-8"))
+        raw = stdout.decode("utf-8")
+        logger.info("opencode raw output (%d bytes)\n%s", len(raw), raw[-8000:])
+        try:
+            log_path = os.path.join(
+                os.path.expanduser("~"),
+                ".local",
+                "share",
+                "opencode",
+                "log",
+                "opencode.log",
+            )
+            if os.path.isfile(log_path):
+                with open(log_path, encoding="utf-8") as lf:
+                    logger.info("opencode internal log:\n%s", lf.read()[-8000:])
+        except OSError:
+            pass
+        return extract_text(raw)

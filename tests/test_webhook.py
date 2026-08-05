@@ -479,7 +479,6 @@ async def test_job_times_out_without_report() -> None:
         await asyncio.sleep(1.1)
     assert job.status == "failed"
     assert job.error == "review report timed out"
-    assert spawner.cleaned == [job.id]
     assert not store.all()
 
 

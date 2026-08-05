@@ -261,7 +261,7 @@ async def _resolve_durable_state(
     spawner: PodSpawner,
 ) -> None:
     """Set *job.status* based on the durable secret and pod phase."""
-    if durable is not None and durable.status in ("posted", "failed"):
+    if durable is not None and durable.status in ("completed", "posted", "failed"):
         job.status = durable.status
         logger.info("job %s finished; cleaning up", job.id)
         return
@@ -334,7 +334,6 @@ async def _watch_job(
             except asyncio.TimeoutError:
                 pass
     finally:
-        await spawner.cleanup(job)
         await store.remove(job.id)
 
 
@@ -358,6 +357,20 @@ async def _evictor(store: JobStore) -> None:
         except Exception:  # pylint: disable=broad-exception-caught
             # Background maintenance loop — must never terminate
             logger.exception("eviction of stale jobs failed")
+
+
+COMPLETED_GC_INTERVAL = 300
+COMPLETED_RETENTION = 900
+
+
+async def _completed_gc(spawner: PodSpawner) -> None:
+    """Periodically clean up completed reviewer pods older than the retention."""
+    while True:
+        await asyncio.sleep(COMPLETED_GC_INTERVAL)
+        try:
+            await spawner.cleanup_completed(COMPLETED_RETENTION)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("completed job GC failed")
 
 
 async def _decode_event(
@@ -684,7 +697,7 @@ async def _post_review(
             logger.debug("could not mark durable state failed for %s", job_id)
         return JSONResponse({"error": "review submission failed"}, status_code=502)
     job.body = body
-    job.status = "posted"
+    job.status = "completed"
     job.reported.set()
     try:
         await client.set_commit_status(
@@ -699,13 +712,12 @@ async def _post_review(
             job.event.repo,
             job.event.ref,
         )
-    await spawner.cleanup(job)
-    logger.info(
-        "received review from slave PR #%s repo %s",
-        job.event.ref,
-        job.event.repo,
-    )
-    return JSONResponse({"status": "ok"}, status_code=200)
+        logger.info(
+            "received review from slave PR #%s repo %s",
+            job.event.ref,
+            job.event.repo,
+        )
+        return JSONResponse({"status": "ok"}, status_code=200)
 
 
 def create_app(  # pylint: disable=too-many-locals
@@ -744,7 +756,7 @@ def create_app(  # pylint: disable=too-many-locals
             await _recover_watchers(spawner, track, settings.report_timeout_seconds)
         except K8sApiError:
             logger.exception("recovery of orphan watchers failed")
-        for task in (_sweeper(spawner), _evictor(store)):
+        for task in (_sweeper(spawner), _evictor(store), _completed_gc(spawner)):
             created = asyncio.create_task(task)
             tasks.add(created)
             created.add_done_callback(tasks.discard)

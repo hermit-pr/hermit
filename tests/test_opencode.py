@@ -85,14 +85,14 @@ def test_opencode_config_includes_permission_block() -> None:
     assert permission["webfetch"] == "deny"
     assert permission["question"] == "deny"
     bash = permission["bash"]
-    assert bash["*"] == "ask"
+    assert bash["*"] == "deny"
     assert bash["git diff*"] == "allow"
     assert bash["git log*"] == "allow"
-    assert bash["git status*"] == "allow"
+    assert bash["git show*"] == "allow"
+    assert bash["grep*"] == "allow"
+    assert bash["cat*"] == "allow"
+    assert bash["ls*"] == "allow"
     assert bash["read"] == "allow"
-    assert bash["git push*"] == "deny"
-    assert bash["git commit*"] == "deny"
-    assert bash["git tag*"] == "deny"
 
 
 def test_opencode_environment_pins_config_for_antismuggling() -> None:

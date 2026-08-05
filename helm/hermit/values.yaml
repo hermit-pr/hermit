@@ -78,6 +78,21 @@ config:
   rateLimitWindowSeconds: 60
   trustXForwardedFor: false
 
+# Egress restrictions for reviewer (slave) pods. When enabled, reviewer pods
+# can only reach the master pod, kube-dns, and the configured git host and
+# vLLM endpoint CIDRs. This prevents the opencode agent from making outbound
+# connections to any other destination via bash (curl, wget, etc.).
+networkPolicy:
+  enabled: false
+  # CIDR block of the on-premise Git host (GitHub Enterprise or GitLab).
+  gitHostCidr: ""
+  # TCP port of the Git host (default 443 for HTTPS).
+  gitHostPort: 443
+  # CIDR block of the self-hosted vLLM endpoint.
+  vllmCidr: ""
+  # TCP port of the vLLM endpoint (default 8000).
+  vllmPort: 8000
+
 # Secrets are never stored in the chart or in values. Each entry references an
 # existing Kubernetes Secret in the same namespace by name and key, so real
 # tokens never appear in values files or the rendered manifests.
