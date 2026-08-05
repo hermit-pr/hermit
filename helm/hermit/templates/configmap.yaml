@@ -12,6 +12,7 @@ data:
   {{- if .Values.config.reviewRules }}
   HERMIT_REVIEW_RULES: {{ .Values.config.reviewRules | quote }}
   {{- end }}
+  HERMIT_TRIGGER_TAGS: {{ .Values.config.triggerTags | toJson | quote }}
   HERMIT_OPENCODE_BIN: {{ .Values.config.opencodeBin | quote }}
   HERMIT_WORKSPACE: {{ .Values.config.workspace | quote }}
   HERMIT_LOG_LEVEL: {{ .Values.config.logLevel | quote }}

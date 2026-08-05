@@ -66,6 +66,7 @@ class Settings(_SettingsBase):
     review_rules: str = ""
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
+    trigger_tags: List[str] = Field(default_factory=lambda: ["@hermit", "/recheck"])
 
     rate_limit_per_ip: int = 60
     rate_limit_global: int = 600

@@ -35,6 +35,11 @@ config:
   # Optional. Extra output instructions appended to the bot's hardcoded
   # default review output; never replaces the internal operating prompt.
   reviewRules: ""
+  # Comment trigger tags. A comment matching any of these on a PR/MR
+  # spawns a review. Default: ["@hermit", "/recheck"]
+  triggerTags:
+    - "@hermit"
+    - "/recheck"
   opencodeBin: opencode
   opencodeInitImage: "ghcr.io/anomalyco/opencode:latest"
   opencodeInitBinPath: "/usr/local/bin/opencode"
