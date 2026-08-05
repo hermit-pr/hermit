@@ -7,13 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-05
+
+### Fixed
+
+- ``hermit-reviewer`` agent stalled indefinitely on review tasks. Root cause
+  was ``mode: all`` (the agent wasn't primary) combined with
+  ``question: deny`` blocking the model from asking for clarification. Changed
+  to ``mode: primary`` and added ``recovery: deny`` to the agent's permission
+  block to prevent opencode from injecting stuck-detection prompts.
+
 ## [0.2.3] - 2026-08-05
 
 ### Fixed
 
 - ``hermit-reviewer`` agent used ``mode: subagent`` which prevented it from
   being invoked directly via ``--agent``; changed to ``mode: all`` so opencode
-  can run it as a primary agent.
+  could run it. (Later found ``primary`` was the correct mode.)
 
 ## [0.2.2] - 2026-08-05
 
@@ -217,7 +227,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...main
+[0.2.4]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...v0.2.4
 [0.2.3]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.2...v0.2.3
 [0.2.2]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...v0.2.2
 [0.2.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...v0.2.1

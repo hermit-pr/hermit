@@ -159,13 +159,14 @@ class OpenCodeRunner:
                         "evaluates pull requests for correctness, "
                         "security, and maintainability"
                     ),
-                    "mode": "all",
+                    "mode": "primary",
                     "temperature": 0.1,
                     "prompt": agent_prompt,
                     "permission": {
                         "edit": "deny",
                         "webfetch": "deny",
                         "question": "deny",
+                        "recovery": "deny",
                         "bash": BASH_PERMISSIONS,
                     },
                 }
