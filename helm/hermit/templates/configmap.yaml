@@ -12,7 +12,7 @@ data:
   {{- if .Values.config.reviewRules }}
   HERMIT_REVIEW_RULES: {{ .Values.config.reviewRules | quote }}
   {{- end }}
-  HERMIT_OPCODE_BIN: {{ .Values.config.opencodeBin | quote }}
+  HERMIT_OPENCODE_BIN: {{ .Values.config.opencodeBin | quote }}
   HERMIT_WORKSPACE: {{ .Values.config.workspace | quote }}
   HERMIT_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   HERMIT_PORT: {{ .Values.service.port | quote }}
@@ -21,8 +21,8 @@ data:
   HERMIT_POD_NAMESPACE: {{ .Values.config.podNamespace | quote }}
   HERMIT_POD_SERVICE_ACCOUNT: {{ .Values.config.podServiceAccount | quote }}
   HERMIT_REPORT_TIMEOUT_SECONDS: {{ .Values.config.reportTimeoutSeconds | quote }}
-  HERMIT_OPCODE_INIT_IMAGE: {{ .Values.config.opencodeInitImage | quote }}
-  HERMIT_OPCODE_INIT_BIN_PATH: {{ .Values.config.opencodeInitBinPath | quote }}
+  HERMIT_OPENCODE_INIT_IMAGE: {{ .Values.config.opencodeInitImage | quote }}
+  HERMIT_OPENCODE_INIT_BIN_PATH: {{ .Values.config.opencodeInitBinPath | quote }}
   HERMIT_POLICY_FILE_PATH: {{ .Values.config.policyFilePath | quote }}
   HERMIT_POD_CPU_REQUEST: {{ .Values.config.podResources.requests.cpu | quote }}
   HERMIT_POD_MEMORY_REQUEST: {{ .Values.config.podResources.requests.memory | quote }}
@@ -34,13 +34,10 @@ data:
   HERMIT_TRUST_X_FORWARDED_FOR: {{ .Values.config.trustXForwardedFor | quote }}
   HERMIT_MAX_BODY_BYTES: {{ int .Values.config.maxBodyBytes | quote }}
   HERMIT_MAX_CONCURRENT_JOBS: {{ .Values.config.maxConcurrentJobs | quote }}
-  HERMIT_OPCODE_TIMEOUT_SECONDS: {{ .Values.config.opencodeTimeoutSeconds | quote }}
+  HERMIT_OPENCODE_TIMEOUT_SECONDS: {{ .Values.config.opencodeTimeoutSeconds | quote }}
   HERMIT_ABANDONED_JOB_TIMEOUT_SECONDS: {{ .Values.config.abandonedJobTimeoutSeconds | quote }}
-  HERMIT_OPCODE_INIT_IMAGE_PULL_POLICY: {{ .Values.config.opencodeInitImagePullPolicy | quote }}
+  HERMIT_OPENCODE_INIT_IMAGE_PULL_POLICY: {{ .Values.config.opencodeInitImagePullPolicy | quote }}
   HERMIT_POD_IMAGE_PULL_POLICY: {{ .Values.config.podImagePullPolicy | quote }}
-  {{- if .Values.config.opencodeArgs }}
-  HERMIT_OPCODE_ARGS: {{ join " " .Values.config.opencodeArgs | quote }}
-  {{- end }}
   {{- if or .Values.caBundle.configMap .Values.caBundle.secret }}
   {{- $key := .Values.caBundle.secretKey }}
   {{- if .Values.caBundle.configMap }}

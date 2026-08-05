@@ -54,7 +54,7 @@ def test_pod_environment_without_init_image() -> None:
     settings = make_settings(opencode_init_image="", opencode_bin="custom-opencode")
     job = make_job()
     env = pod_environment(settings, job)
-    assert env["HERMIT_OPCODE_BIN"] == "custom-opencode"
+    assert env["HERMIT_OPENCODE_BIN"] == "custom-opencode"
 
 
 def test_pod_environment_includes_version() -> None:
@@ -70,7 +70,7 @@ def test_pod_environment_with_init_image() -> None:
     settings = make_settings(opencode_init_image="ghcr.io/anomalyco/opencode:latest")
     job = make_job()
     env = pod_environment(settings, job)
-    assert env["HERMIT_OPCODE_BIN"] == "/opencode-bin/opencode"
+    assert env["HERMIT_OPENCODE_BIN"] == "/opencode-bin/opencode"
 
 
 def test_pod_environment_sets_ca_trust_env_when_configured() -> None:

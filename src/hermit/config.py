@@ -79,7 +79,9 @@ class Settings(_SettingsBase):
     pod_memory_limit: str = "2Gi"
 
     opencode_bin: str = "opencode"
-    opencode_args: List[str] = Field(default_factory=lambda: ["run"])
+    opencode_args: List[str] = Field(
+        default_factory=lambda: ["run", "--auto", "--format", "json"]
+    )
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_init_image_pull_policy: str = "IfNotPresent"
@@ -156,7 +158,9 @@ class SlaveSettings(_SettingsBase):
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
     opencode_bin: str = "opencode"
-    opencode_args: List[str] = Field(default_factory=lambda: ["run"])
+    opencode_args: List[str] = Field(
+        default_factory=lambda: ["run", "--auto", "--format", "json"]
+    )
     opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_timeout_seconds: int = 900

@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS base
+FROM python:3.14-alpine AS base
 
 # Install the opencode binary into the image for local dev only. The
 # production path is the init-container pattern, so this stays off by default.
@@ -11,15 +11,13 @@ WORKDIR /app
 
 LABEL org.opencontainers.image.description="H.E.R.M.I.T — airgapped code-review bot for on-premise GitLab & GitHub, powered by opencode + vLLM"
 
-RUN groupadd --system hermit \
-    && useradd --system --gid hermit --home-dir /app hermit \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends git \
+RUN addgroup -S hermit \
+    && adduser -S -G hermit -h /app hermit \
+    && apk add --no-cache git libstdc++ libgcc \
     && if [ "$INSTALL_OPENCODE" = "true" ]; then \
-         apt-get install -y --no-install-recommends nodejs npm \
+         apk add --no-cache nodejs npm \
          && npm install -g opencode-ai; \
-       fi \
-    && rm -rf /var/lib/apt/lists/*
+       fi
 
 COPY pyproject.toml README.md ./
 COPY src ./src

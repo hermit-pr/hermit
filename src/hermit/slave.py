@@ -96,7 +96,6 @@ async def run_review(settings: SlaveSettings) -> str:
     )
     runner = OpenCodeRunner(
         settings.opencode_bin,
-        settings.opencode_args,
         settings.vllm_endpoint,
         settings.model,
         workspace,
@@ -153,3 +152,7 @@ def main() -> None:
     except (RuntimeError, ValueError, OSError, httpx.HTTPError):
         logger.exception("review failed")
         raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()

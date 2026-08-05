@@ -12,7 +12,7 @@ def test_settings_accepts_minimal_keyword_arguments() -> None:
     settings = make_settings()
     assert settings.git_provider == "github"
     assert settings.port == 8080
-    assert settings.opencode_args == ["run"]
+    assert settings.opencode_args == ["run", "--auto", "--format", "json"]
     assert settings.report_timeout_seconds == 1800
 
 
