@@ -1,0 +1,52 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hermit.fullname" . }}-slave-deny
+  labels:
+    {{- include "hermit.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: hermit-review
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.networkPolicy.gitHostCidr }}
+    # Git host
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.gitHostCidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.gitHostPort }}
+    {{- end }}
+    {{- if .Values.networkPolicy.vllmCidr }}
+    # vLLM endpoint
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.vllmCidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.vllmPort }}
+    {{- end }}
+    # Master pod (same namespace, internal report endpoint)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "hermit.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+{{- end }}

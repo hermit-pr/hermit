@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-06
+
+### Fixed
+
+- Reviewer pod stalled because bash permissions had ``"*": "ask"``, which
+  deadlocked when opencode's built-in ``explore`` subagent tried to run
+  diagnostic commands like ``which rg``. The ``--auto`` flag should have
+  auto-approved asks but did not apply at the agent level.
+- ``*: deny`` is now the default for bash permissions. An explicit allow-list
+  gates every permitted command: git read-only operations, grep, find, cat,
+  head, tail, ls, wc, sort, uniq, cut, tr, echo, which, pwd, env, date,
+  printf, expr, test, true, false, dirname, basename, xargs, and read. Any
+  command not in the allow-list (rm, curl, apt, docker, kubectl, chmod, tee,
+  mv, mkdir, cp, kill, sudo, mount, etc.) is blocked.
+- Agent ``task`` permission set to ``{"*": "deny"}`` to prevent the
+  hermit-reviewer agent from spawning subagents (explore, general, scout)
+  entirely — their permission prompts were the root cause of the stalls.
+
+### Added
+
+- NetworkPolicy template (``slave-networkpolicy.yaml``) to restrict egress
+  from reviewer pods. When enabled via ``networkPolicy.enabled: true``,
+  reviewer pods can only reach: kube-dns (UDP/TCP 53), the configured git
+  host CIDR and port, the configured vLLM endpoint CIDR and port, and the
+  master pod in the same namespace. This prevents the opencode agent from
+  making outbound connections to any other destination, even if an allowed
+  bash command (e.g. ``curl``) were never explicitly denied in future code.
+
 ## [0.2.5] - 2026-08-05
 
 ### Fixed
@@ -237,7 +265,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...main
+[0.2.6]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...v0.2.6
 [0.2.5]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...v0.2.5
 [0.2.4]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...v0.2.4
 [0.2.3]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.2...v0.2.3
