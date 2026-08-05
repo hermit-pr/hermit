@@ -708,7 +708,7 @@ async def _post_review(
     return JSONResponse({"status": "ok"}, status_code=200)
 
 
-def create_app(
+def create_app(  # pylint: disable=too-many-locals
     settings: Settings,
     client: GitClient,
     spawner: PodSpawner,
@@ -784,6 +784,19 @@ def create_app(
             track=track,
             client=client,
         )
+
+    @app.get("/")
+    async def root() -> dict:
+        """Return a service directory so users can find the correct webhook URLs."""
+        return {
+            "service": "H.E.R.M.I.T",
+            "version": __version__,
+            "endpoints": {
+                "healthz": "GET /healthz",
+                "github_webhook": "POST /webhook/github",
+                "gitlab_webhook": "POST /webhook/gitlab",
+            },
+        }
 
     @app.get("/healthz")
     async def healthz() -> dict:
