@@ -699,12 +699,12 @@ async def _post_review(
             job.event.repo,
             job.event.ref,
         )
-    await spawner.cleanup(job)
     logger.info(
         "received review from slave PR #%s repo %s",
         job.event.ref,
         job.event.repo,
     )
+    await spawner.cleanup(job)
     return JSONResponse({"status": "ok"}, status_code=200)
 
 

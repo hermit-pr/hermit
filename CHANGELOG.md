@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-06
+
+### Fixed
+
+- Signal handler noise on successful review: the slave pod's SIGTERM handler
+  no longer POSTs a spurious failure report when the review was already sent.
+  Previously the master deleted the pod (via ``cleanup()``) immediately after
+  posting the review, causing a sequence of "received signal 15, reporting
+  failure" → "report for unknown job → 404" in both the slave and master logs.
+- Master log ordering: "received review from slave" now appears before
+  ``cleanup()``, so the log order reflects the actual event sequence.
+
+### Added
+
+- ``opencode run`` now uses ``--print-logs`` flag so opencode's internal logs
+  are emitted on stderr and captured by the pod's log collector. Previously
+  these were written to ``/home/hermit/.local/share/opencode/log/`` and lost
+  when the pod was deleted.
+
 ## [0.2.6] - 2026-08-06
 
 ### Fixed
@@ -265,7 +284,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.7...main
+[0.2.7]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...v0.2.7
 [0.2.6]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.5...v0.2.6
 [0.2.5]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.4...v0.2.5
 [0.2.4]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...v0.2.4

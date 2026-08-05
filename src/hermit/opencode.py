@@ -231,9 +231,17 @@ class OpenCodeRunner:
         self._write_config()
         prompt_path = Path(self._workspace) / "review-prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
-        command = [self._bin, "run", "--auto", "--format", "json", str(prompt_path)]
+        command = [
+            self._bin,
+            "run",
+            "--auto",
+            "--print-logs",
+            "--format",
+            "json",
+            str(prompt_path),
+        ]
         logger.info(
-            "running opencode %s run --auto --format json (model=%s)",
+            "running opencode %s run --auto --print-logs --format json (model=%s)",
             self._bin,
             self._model,
         )

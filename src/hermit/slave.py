@@ -122,11 +122,17 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.report_secret.get_secret_value(),
         body,
     )
+    _review_posted[0] = True
     return body
+
+
+_review_posted = [False]
 
 
 def _handle_signal(signum: int, _frame: object) -> None:
     """Report a failure to the master before exiting on SIGTERM/SIGINT."""
+    if _review_posted[0]:
+        return
     logger.warning("received signal %d, reporting failure", signum)
     try:
         settings = SlaveSettings()
