@@ -36,8 +36,6 @@ config:
   # default review output; never replaces the internal operating prompt.
   reviewRules: ""
   opencodeBin: opencode
-  opencodeArgs:
-    - run
   opencodeInitImage: "ghcr.io/anomalyco/opencode:latest"
   opencodeInitBinPath: "/usr/local/bin/opencode"
   workspace: /workspace

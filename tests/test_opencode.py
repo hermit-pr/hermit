@@ -14,7 +14,6 @@ def _run(opencode_opts: dict) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
             bin_path="opencode",
-            args=["run"],
             endpoint="http://vllm.example:8000/v1",
             model="llama-3.1-8b-instruct",
             workspace=tmp,
@@ -30,7 +29,6 @@ def test_opencode_config_wires_endpoint_and_model() -> None:
     """The generated opencode.json targets the vLLM endpoint and model."""
     config = _run({})
     provider = config["provider"]["vllm"]
-    assert provider["npm"] == "@ai-sdk/openai-compatible"
     assert provider["options"]["baseURL"] == "http://vllm.example:8000/v1"
     assert config["model"] == "vllm/llama-3.1-8b-instruct"
     assert "llama-3.1-8b-instruct" in provider["models"]
@@ -55,7 +53,6 @@ def test_opencode_environment_exports_api_key_when_present() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
             bin_path="opencode",
-            args=["run"],
             endpoint="http://vllm.example:8000/v1",
             model="llama-3.1-8b-instruct",
             workspace=tmp,
@@ -72,7 +69,6 @@ def test_opencode_environment_omits_api_key_when_absent() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
             bin_path="opencode",
-            args=["run"],
             endpoint="http://vllm.example:8000/v1",
             model="llama-3.1-8b-instruct",
             workspace=tmp,
@@ -82,16 +78,21 @@ def test_opencode_environment_omits_api_key_when_absent() -> None:
 
 
 def test_opencode_config_includes_permission_block() -> None:
-    """The generated config forbids mutating shell commands."""
+    """The generated config restricts tools via per-tool permission rules."""
     config = _run({})
     permission = config["permission"]
-    assert "*git push*" in permission["deny"]
-    assert "*git commit*" in permission["deny"]
-    assert "*git tag*" in permission["deny"]
-    assert "*write*" in permission["deny"]
-    assert "git diff*" in permission["allow"]
-    assert "git log*" in permission["allow"]
-    assert "read" in permission["allow"]
+    assert permission["edit"] == "deny"
+    assert permission["webfetch"] == "deny"
+    assert permission["question"] == "deny"
+    bash = permission["bash"]
+    assert bash["*"] == "ask"
+    assert bash["git diff*"] == "allow"
+    assert bash["git log*"] == "allow"
+    assert bash["git status*"] == "allow"
+    assert bash["read"] == "allow"
+    assert bash["git push*"] == "deny"
+    assert bash["git commit*"] == "deny"
+    assert bash["git tag*"] == "deny"
 
 
 def test_opencode_environment_pins_config_for_antismuggling() -> None:
@@ -99,7 +100,6 @@ def test_opencode_environment_pins_config_for_antismuggling() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
             bin_path="opencode",
-            args=["run"],
             endpoint="http://vllm.example:8000/v1",
             model="llama-3.1-8b-instruct",
             workspace=tmp,
@@ -114,7 +114,6 @@ def test_opencode_environment_sets_airgap_flags() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
             bin_path="opencode",
-            args=["run"],
             endpoint="http://vllm.example:8000/v1",
             model="llama-3.1-8b-instruct",
             workspace=tmp,

@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-05
+
+First stable release — the reviewer pipeline now works end-to-end in
+production environments (airgapped GitHub Enterprise + self-hosted vLLM).
+
+### Changed
+
+- Docker image switched from `python:3.13-slim` (glibc) to `python:3.14-alpine`
+  (musl) for compatibility with the opencode init-container binary; added
+  ``libstdc++`` and ``libgcc`` packages for C++ runtime support (image size
+  reduced from ~120 MB to ~51 MB).
+- OpenCode permission model rewritten for opencode ≥1.18.10: per-tool rules
+  replace the legacy flat deny/allow arrays; ``edit``, ``webfetch``, and
+  ``question`` tools are denied; bash commands use per-pattern rules (read
+  commands allowed, write commands denied, everything else ``ask``); all
+  non-vLLM providers explicitly disabled.
+- ``opencode_args`` config key removed; arguments ``["run", "--auto",
+  "--format", "json"]`` are now hardcoded in ``OpenCodeRunner`` — the NDJSON
+  output format is required by the parser and there is no use-case for changing
+  it.
+- Reviewer pod entrypoint changed from ``python -m hermit.slave`` to the
+  ``hermit-slave`` console script.
+- The model name from ``HERMIT_MODEL`` is passed verbatim into the opencode
+  config with no transformation; the operator controls the exact name the API
+  sees.
+- Uvicorn access and error logs now share the same ISO-8601 timestamp format as
+  the application logger.
+
+### Fixed
+
+- Environment variable prefix typo: ``HERMIT_OPCODE_*`` → ``HERMIT_OPENCODE_*``
+  in the Helm ConfigMap template and ``k8s.py`` pod environment. The
+  misspelling caused every setting to silently fall back to its Python default
+  instead of reading the chart-configured values (e.g. init-container image,
+  timeout).
+- GitHub Enterprise org membership checks now accept HTTP ``204 No Content``
+  (GHE returns this for confirmed members, not ``200 OK``). Previously only
+  ``200`` was treated as success, causing false-negative membership rejections.
+- ``python -m hermit.slave`` did nothing because ``slave.py`` had no
+  ``if __name__ == "__main__"`` guard — the module imported and exited with
+  code 0 without running the review. Added the guard and switched to the
+  console-script entrypoint.
+- ``$HOME`` was unset in reviewer pods, causing opencode's Bun runtime to
+  attempt writes to ``/.local/`` on the read-only root filesystem. Added
+  ``HOME=/home/hermit`` to point at the writable volume mount.
+- ``opencode_args`` JSON serialization: ``k8s.py`` used ``shlex.join()`` on the
+  arg list, producing a plain string that pydantic-settings rejected as
+  invalid JSON. Args are no longer serialized (removed from ConfigMap).
+- Docker image added ``libstdc++`` and ``libgcc`` so the musl-compiled opencode
+  binary from the init container can resolve C++ symbols (was ``/opencode-bin/
+  opencode: not found`` on glibc).
+
 ## [0.1.1] - 2026-08-05
 
 ### Fixed
@@ -120,6 +172,7 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...main
+[0.2.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...v0.2.0
 [0.1.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...v0.1.1
 [0.1.0]: https://gitlab.com/hermit-bot/hermit/-/tags/v0.1.0

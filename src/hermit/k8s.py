@@ -11,7 +11,6 @@ restarts. A background sweep reclaims orphaned pods and Secrets.
 import asyncio
 import base64
 import logging
-import shlex
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -61,6 +60,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
     if settings.opencode_init_image:
         opencode_bin = "/opencode-bin/opencode"
     env = {
+        "HOME": "/home/hermit",
         "HERMIT_JOB_ID": job.id,
         "HERMIT_VERSION": __version__,
         "HERMIT_GIT_PROVIDER": settings.git_provider,
@@ -76,8 +76,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_VLLM_ENDPOINT": settings.vllm_endpoint,
         "HERMIT_MODEL": settings.model,
         "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
-        "HERMIT_OPCODE_BIN": opencode_bin,
-        "HERMIT_OPCODE_ARGS": shlex.join(settings.opencode_args),
+        "HERMIT_OPENCODE_BIN": opencode_bin,
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,
     }
@@ -422,7 +421,7 @@ class K8sPodSpawner(PodSpawner):
             name="reviewer",
             image=s.pod_image,
             image_pull_policy=s.pod_image_pull_policy,
-            command=["python", "-m", "hermit.slave"],
+            command=["hermit-slave"],
             env=env_vars,
             volume_mounts=volume_mounts + container_volumes,
             security_context=kubernetes.client.V1SecurityContext(

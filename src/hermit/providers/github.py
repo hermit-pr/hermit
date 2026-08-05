@@ -75,13 +75,15 @@ class GitHubClient(GitClient):
     async def check_membership(self, org: str, username: str) -> bool:
         """Return True when ``username`` is a member of ``org``.
 
-        First tries the org membership endpoint (requires ``read:org`` scope).
-        Falls back to the repo collaborator endpoint (requires only ``repo`` scope)
-        to handle outside collaborators.
+        The GitHub Enterprise org membership endpoint returns **204 No Content**
+        for members (not 200), and **302 Found** (redirect to ``/login``) for
+        non-members or when the token lacks the ``read:org`` scope.
+        Falls back to the repo collaborator endpoint (requires only ``repo``
+        scope) to handle outside collaborators.
         """
         path = f"/orgs/{org}/members/{username}"
         response = await self._request("GET", path)
-        if response.status_code == 200:
+        if response.status_code in (200, 204):
             return True
         if response.status_code == 404:
             return False

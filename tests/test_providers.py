@@ -215,7 +215,7 @@ async def test_github_client_does_not_retry_4xx() -> None:
 
 @pytest.mark.asyncio
 async def test_github_check_membership_accepts_member() -> None:
-    """A 200 on the membership endpoint means the user is a member."""
+    """A 204 on the membership endpoint means the user is a member."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/orgs/acme/members/alice"

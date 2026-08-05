@@ -33,6 +33,10 @@ def run() -> None:
         settings.host,
         settings.port,
     )
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
     client = build_git_client(settings)
     spawner = build_spawner(settings)
     store = JobStore(
@@ -41,7 +45,11 @@ def run() -> None:
     )
     app = create_app(settings, client, spawner, store)
     uvicorn.run(
-        app, host=settings.host, port=settings.port, log_level=settings.log_level
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level,
+        log_config={"version": 1, "disable_existing_loggers": False},
     )
 
 

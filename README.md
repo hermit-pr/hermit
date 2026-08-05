@@ -80,10 +80,9 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | extra output instructions appended to the bot's hardcoded default review rules (never replaces the internal operating prompt) |
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit (default `AGENTS.md`) |
-| `HERMIT_OPCODE_BIN` | no | path to the opencode binary (default `opencode`) |
-| `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode arguments (default `run`) |
-| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image providing opencode binary (default `ghcr.io/anomalyco/opencode:latest`; empty to disable) |
-| `HERMIT_OPCODE_INIT_BIN_PATH` | no | path to opencode binary inside init image (default `/usr/local/bin/opencode`) |
+| `HERMIT_OPENCODE_BIN` | no | path to the opencode binary (default `opencode`) |
+| `HERMIT_OPENCODE_INIT_IMAGE` | no | init container image providing opencode binary (default `ghcr.io/anomalyco/opencode:latest`; empty to disable) |
+| `HERMIT_OPENCODE_INIT_BIN_PATH` | no | path to opencode binary inside init image (default `/usr/local/bin/opencode`) |
 | `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |
 | `HERMIT_MASTER_URL` | yes | URL reviewer pods use to reach `/internal/report` |
 | `HERMIT_POD_IMAGE` | yes | container image for reviewer pods |
@@ -91,7 +90,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_POD_SERVICE_ACCOUNT` | no | ServiceAccount for reviewer pods |
 | `HERMIT_REPORT_TIMEOUT_SECONDS` | no | max wait for a review before failing the job (default 1800) |
 | `HERMIT_ABANDONED_JOB_TIMEOUT_SECONDS` | no | max age of an orphaned job Secret before sweep deletes it (default 3600) |
-| `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess inside the reviewer pod (default 900) |
+| `HERMIT_OPENCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess inside the reviewer pod (default 900) |
 | `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods a single replica may have in flight at once (default 20) |
 | `HERMIT_RATE_LIMIT_PER_IP` | no | max requests per source IP per window (default 60) |
 | `HERMIT_RATE_LIMIT_GLOBAL` | no | max requests overall per window (default 600) |
@@ -127,7 +126,7 @@ The master fills these from the originating change event; the pod only reads the
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode configuration |
 | `HERMIT_VLLM_API_KEY` | optional API key forwarded to the vLLM endpoint (from the job Secret) |
 | `HERMIT_POLICY_FILE_PATH` | project policy file to extract from the base commit |
-| `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
+| `HERMIT_OPENCODE_BIN` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
 | `HERMIT_MASTER_URL` | where to report the review |
 | `HERMIT_REPORT_SECRET` | per-job report secret (from the job Secret) |
@@ -147,12 +146,12 @@ The `docker-build` pipeline job builds the image and pushes it to your GitLab Co
 - every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
 - tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
 
-The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.1.1`), so the versioned image is used automatically.
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.2.0`), so the versioned image is used automatically.
 
 For example:
 
 ```sh
-docker pull registry.gitlab.com/hermit-bot/hermit:0.1.1
+docker pull registry.gitlab.com/hermit-bot/hermit:0.2.0
 ```
 
 Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (this repo is `registry.gitlab.com/hermit-bot/hermit`).
@@ -187,10 +186,10 @@ The `helm-package` pipeline job packages the chart and pushes it to
 ```sh
 helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.1.1 \
+  --version 0.2.0 \
   --set image.repository=registry.gitlab.com/hermit-bot/hermit \
   --set config.gitProvider=gitlab \
-  --set config.gitHostUrl=https://gitlab.example.com \
+  --set config.gitHostUrl=https://gitlab.example.com/api/v4 \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
   --set config.model=llama-3.1-8b-instruct \
   --set secrets.gitReadToken.name=git-read \
@@ -262,7 +261,7 @@ takes precedence when both `configMap` and `secret` are set.
 kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
 
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.1.1 \
+  --version 0.2.0 \
   --set ... \
   --set caBundle.configMap=ca-bundle-cm \
   --set caBundle.configMapKey=ca.pem
@@ -275,7 +274,7 @@ Point GitLab/GitHub webhooks at the master Service (`http://<release-name>-hermi
 ### 5. Verify
 
 - `kubectl get pods` — the master should be `Running`.
-- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.1.1"}`.
+- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.2.0"}`.
 - Open a PR/MR or write `@hermit` in a comment: a reviewer pod is spawned and a review is posted.
 
 ## Running locally
@@ -309,7 +308,7 @@ HERMIT_POD_SPAWNER=fake \
 
 ## Status
 
-**v0.1.1 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
+**v0.2.0 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
 
 ## License
 

@@ -5,35 +5,31 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DENIED_PERMISSIONS = [
-    "*git push*",
-    "*git commit*",
-    "*git remote*",
-    "*git checkout -b*",
-    "*git tag*",
-    "*write*",
-    "*mkdir*",
-    "*edit*",
-]
-ALLOWED_PERMISSIONS = [
-    "git diff*",
-    "git log*",
-    "git status*",
-    "git show*",
-    "git branch*",
-    "git fetch*",
-    "git rev-parse*",
-    "ls*",
-    "cat*",
-    "grep*",
-    "find*",
-    "wc*",
-    "read",
-]
+BASH_PERMISSIONS: dict[str, str] = {
+    "*": "ask",
+    "git diff*": "allow",
+    "git log*": "allow",
+    "git status*": "allow",
+    "git show*": "allow",
+    "git branch*": "allow",
+    "git fetch*": "allow",
+    "git rev-parse*": "allow",
+    "ls*": "allow",
+    "cat*": "allow",
+    "grep*": "allow",
+    "find*": "allow",
+    "wc*": "allow",
+    "read": "allow",
+    "git push*": "deny",
+    "git commit*": "deny",
+    "git remote*": "deny",
+    "git checkout -b*": "deny",
+    "git tag*": "deny",
+}
 
 
 def extract_text(stdout: str) -> str:
@@ -78,7 +74,6 @@ class OpenCodeRunner:
     def __init__(
         self,
         bin_path: str,
-        args: List[str],
         endpoint: str,
         model: str,
         workspace: str,
@@ -88,7 +83,6 @@ class OpenCodeRunner:
         timeout: int = 900,
     ) -> None:
         self._bin = bin_path
-        self._args = args
         self._endpoint = endpoint
         self._model = model
         self._workspace = workspace
@@ -116,16 +110,39 @@ class OpenCodeRunner:
             "autoupdate": False,
             "share": "disabled",
             "enabled_providers": ["vllm"],
+            "disabled_providers": [
+                "opencode",
+                "anthropic",
+                "openai",
+                "google",
+                "mistral",
+                "groq",
+                "github",
+                "xai",
+                "deepseek",
+                "cohere",
+                "together",
+                "fireworks",
+                "perplexity",
+                "replicate",
+                "openrouter",
+                "voyage",
+                "jina",
+                "custom",
+                "amazon-bedrock",
+            ],
             "permission": {
-                "deny": DENIED_PERMISSIONS,
-                "allow": ALLOWED_PERMISSIONS,
+                "bash": BASH_PERMISSIONS,
+                "edit": "deny",
+                "webfetch": "deny",
+                "question": "deny",
             },
             "provider": {
                 "vllm": {
                     "npm": "@ai-sdk/openai-compatible",
                     "name": "H.E.R.M.I.T vLLM",
                     "options": options,
-                    "models": {self._model: {"name": self._model}},
+                    "models": {self._model: {"name": self._model, "id": self._model}},
                 }
             },
         }
@@ -172,11 +189,10 @@ class OpenCodeRunner:
         self._write_config()
         prompt_path = Path(self._workspace) / "review-prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
-        command = [self._bin, *self._args, str(prompt_path)]
+        command = [self._bin, "run", "--auto", "--format", "json", str(prompt_path)]
         logger.info(
-            "running opencode %s %s (model=%s)",
+            "running opencode %s run --auto --format json (model=%s)",
             self._bin,
-            " ".join(self._args),
             self._model,
         )
         process = await asyncio.create_subprocess_exec(
