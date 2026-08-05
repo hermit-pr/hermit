@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from hermit.config import DEFAULT_REVIEW_RULES
+
 logger = logging.getLogger(__name__)
 
 BASH_PERMISSIONS: dict[str, str] = {
@@ -80,6 +82,7 @@ class OpenCodeRunner:
         *,
         api_key: Optional[str] = None,
         extra_env: Optional[dict[str, str]] = None,
+        review_rules: str = "",
         timeout: int = 900,
     ) -> None:
         self._bin = bin_path
@@ -88,6 +91,7 @@ class OpenCodeRunner:
         self._workspace = workspace
         self._api_key = api_key
         self._extra_env = extra_env or {}
+        self._review_rules = review_rules
         self._timeout = timeout
 
     def _write_config(self) -> None:
@@ -104,6 +108,9 @@ class OpenCodeRunner:
         options: dict[str, object] = {"baseURL": self._endpoint}
         if self._api_key:
             options["apiKey"] = "{env:VLLM_API_KEY}"
+        agent_prompt = DEFAULT_REVIEW_RULES
+        if self._review_rules:
+            agent_prompt += "\n" + self._review_rules
         config: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "model": f"vllm/{self._model}",
@@ -143,6 +150,24 @@ class OpenCodeRunner:
                     "name": "H.E.R.M.I.T vLLM",
                     "options": options,
                     "models": {self._model: {"name": self._model, "id": self._model}},
+                }
+            },
+            "agent": {
+                "hermit-reviewer": {
+                    "description": (
+                        "H.E.R.M.I.T code reviewer — "
+                        "evaluates pull requests for correctness, "
+                        "security, and maintainability"
+                    ),
+                    "mode": "subagent",
+                    "temperature": 0.1,
+                    "prompt": agent_prompt,
+                    "permission": {
+                        "edit": "deny",
+                        "webfetch": "deny",
+                        "question": "deny",
+                        "bash": BASH_PERMISSIONS,
+                    },
                 }
             },
         }
@@ -189,9 +214,19 @@ class OpenCodeRunner:
         self._write_config()
         prompt_path = Path(self._workspace) / "review-prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
-        command = [self._bin, "run", "--auto", "--format", "json", str(prompt_path)]
+        command = [
+            self._bin,
+            "run",
+            "--auto",
+            "--agent",
+            "hermit-reviewer",
+            "--format",
+            "json",
+            str(prompt_path),
+        ]
         logger.info(
-            "running opencode %s run --auto --format json (model=%s)",
+            "running opencode %s run --auto --agent hermit-reviewer --format json "
+            "(model=%s)",
             self._bin,
             self._model,
         )

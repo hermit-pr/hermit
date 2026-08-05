@@ -86,7 +86,6 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.git_provider,
         settings.repo,
         settings.ref,
-        settings.review_rules,
         diff,
         pr_title=settings.pr_title,
         pr_body=settings.pr_body,
@@ -103,6 +102,7 @@ async def run_review(settings: SlaveSettings) -> str:
             settings.vllm_api_key.get_secret_value() if settings.vllm_api_key else None
         ),
         extra_env={"PROJECT_POLICY_FILE": policy_path},
+        review_rules=settings.review_rules,
         timeout=settings.opencode_timeout_seconds,
     )
     logger.info(
