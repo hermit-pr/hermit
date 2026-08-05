@@ -159,7 +159,7 @@ class OpenCodeRunner:
                         "evaluates pull requests for correctness, "
                         "security, and maintainability"
                     ),
-                    "mode": "subagent",
+                    "mode": "all",
                     "temperature": 0.1,
                     "prompt": agent_prompt,
                     "permission": {

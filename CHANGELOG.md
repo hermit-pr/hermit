@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-05
+
+### Fixed
+
+- ``hermit-reviewer`` agent used ``mode: subagent`` which prevented it from
+  being invoked directly via ``--agent``; changed to ``mode: all`` so opencode
+  can run it as a primary agent.
+
+## [0.2.2] - 2026-08-05
+
+### Changed
+
+- Review architecture redesigned around opencode agents: review rules, output
+  format, and evaluation criteria move from the user prompt into a dedicated
+  ``hermit-reviewer`` subagent defined in the generated ``opencode.json``
+  config. The agent's system prompt contains the trusted rules; the user prompt
+  carries only PR context data (title, description, diff, secret scan).
+- ``opencode`` invoked with ``--agent hermit-reviewer`` so the model receives a
+  single, consistent system-level identity instead of the conflicting "You are
+  H.E.R.M.I.T" persona that caused it to treat the prompt as a template
+  document rather than a review task.
+- Prompt file stripped to pure data — no review rules, no output format
+  instructions, no identity declaration. This eliminates the "would you like me
+  to execute this template?" meta-response observed with earlier prompt formats.
+- ``OpenCodeRunner`` accepts an optional ``review_rules`` parameter and merges
+  it with ``DEFAULT_REVIEW_RULES`` via a newline separator in the agent prompt.
+- ``DEFAULT_REVIEW_RULES`` no longer neutralized in the prompt — backticks and
+  markdown formatting are preserved because they live in the trusted system
+  prompt.
+
+### Removed
+
+- Two tests removed: ``test_build_review_prompt_always_includes_default_rules``
+  and ``test_build_review_prompt_neutralizes_custom_rules`` (rules are no longer
+  in the user prompt at all).
+
 ## [0.2.1] - 2026-08-05
 
 ### Added
@@ -181,7 +217,9 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.3...main
+[0.2.3]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.2...v0.2.3
+[0.2.2]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...v0.2.2
 [0.2.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...v0.2.1
 [0.2.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...v0.2.0
 [0.1.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...v0.1.1
