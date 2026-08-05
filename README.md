@@ -79,6 +79,7 @@ The master is configured through environment variables prefixed with `HERMIT_` (
 | `HERMIT_MODEL` | yes | name of the model served by the vLLM endpoint |
 | `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | extra output instructions appended to the bot's hardcoded default review rules (never replaces the internal operating prompt) |
+| `HERMIT_TRIGGER_TAGS` | no | JSON list of comment triggers (case-insensitive match against comment body); any match spawns a review (default `["@hermit", "/recheck"]`) |
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit (default `AGENTS.md`) |
 | `HERMIT_OPENCODE_BIN` | no | path to the opencode binary (default `opencode`) |
 | `HERMIT_OPENCODE_INIT_IMAGE` | no | init container image providing opencode binary (default `ghcr.io/anomalyco/opencode:latest`; empty to disable) |
@@ -146,12 +147,12 @@ The `docker-build` pipeline job builds the image and pushes it to your GitLab Co
 - every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
 - tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
 
-The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.2.0`), so the versioned image is used automatically.
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.2.1`), so the versioned image is used automatically.
 
 For example:
 
 ```sh
-docker pull registry.gitlab.com/hermit-bot/hermit:0.2.0
+docker pull registry.gitlab.com/hermit-bot/hermit:0.2.1
 ```
 
 Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (this repo is `registry.gitlab.com/hermit-bot/hermit`).
@@ -186,12 +187,13 @@ The `helm-package` pipeline job packages the chart and pushes it to
 ```sh
 helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.2.0 \
+  --version 0.2.1 \
   --set image.repository=registry.gitlab.com/hermit-bot/hermit \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com/api/v4 \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
   --set config.model=llama-3.1-8b-instruct \
+  --set config.triggerTags='{@hermit,/recheck}' \
   --set secrets.gitReadToken.name=git-read \
   --set secrets.gitReadToken.key=token \
   --set secrets.gitRWToken.name=git-rw \
@@ -261,7 +263,7 @@ takes precedence when both `configMap` and `secret` are set.
 kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
 
 helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
-  --version 0.2.0 \
+  --version 0.2.1 \
   --set ... \
   --set caBundle.configMap=ca-bundle-cm \
   --set caBundle.configMapKey=ca.pem
@@ -274,7 +276,7 @@ Point GitLab/GitHub webhooks at the master Service (`http://<release-name>-hermi
 ### 5. Verify
 
 - `kubectl get pods` — the master should be `Running`.
-- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.2.0"}`.
+- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.2.1"}`.
 - Open a PR/MR or write `@hermit` in a comment: a reviewer pod is spawned and a review is posted.
 
 ## Running locally
@@ -308,7 +310,7 @@ HERMIT_POD_SPAWNER=fake \
 
 ## Status
 
-**v0.2.0 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
+**v0.2.1 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
 
 ## License
 

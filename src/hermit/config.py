@@ -19,10 +19,31 @@ DEFAULT_REVIEW_RULES = (
     "- ## Critical changes that need to be fixed\n"
     "- ## Medium issues\n"
     "- ## Low issues\n"
-    "- ## General feedback\n"
-    "Put bugs, security holes and crashes under critical; logic problems and "
-    "missing edge cases under medium; style and minor refactors under low. "
-    "Be concise and concrete."
+    "- ## General feedback\n\n"
+    "Do not summarise the diff — evaluate the change. Judge correctness, "
+    "security, maintainability, and consistency. For each finding explain "
+    "the risk concisely with a concrete fix.\n\n"
+    "What to look for:\n"
+    "- Bugs, security holes, crashes → Critical.\n"
+    "- Logic problems, missing edge cases, silent breakage → Critical or "
+    "Medium depending on blast radius.\n"
+    "- Incomplete changes: are all related files updated? Are deleted files "
+    "cleaned up? Are handlers, variables, callers, or cross-file references "
+    "kept in sync? → Medium.\n"
+    "- Idempotency and safety: does the change produce the same result on "
+    "repeated runs? Could a partial failure leave the system in a broken "
+    "state? Are there assumptions about environment state that could be "
+    "wrong? → Medium.\n"
+    "- Dry-run and error behaviour: what happens when the change is applied "
+    "to a stale environment? → Medium.\n"
+    "- Consistency: does the change follow existing patterns in the repo? "
+    "Gratuitous style breaks or design regressions → Low.\n"
+    "- Secrets audit: classify each candidate in the review as "
+    "[TRUE POSITIVE] or [FALSE POSITIVE].\n"
+    "- Stale references: are there comments, documentation, or other files "
+    "that still point to deleted or renamed symbols? → Medium.\n\n"
+    "Be concise and concrete — a one-line issue with a precise fix is better "
+    "than a paragraph of prose."
 )
 
 
@@ -66,6 +87,7 @@ class Settings(_SettingsBase):
     review_rules: str = ""
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
+    trigger_tags: List[str] = Field(default_factory=lambda: ["@hermit", "/recheck"])
 
     rate_limit_per_ip: int = 60
     rate_limit_global: int = 600

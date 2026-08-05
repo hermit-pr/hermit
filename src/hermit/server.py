@@ -38,8 +38,14 @@ logger = logging.getLogger(__name__)
 
 GITHUB_ACTIONS = ("opened", "reopened", "synchronize")
 GITLAB_ACTIONS = ("open", "reopen", "update")
-BOT_MENTION = "@hermit"
+DEFAULT_TRIGGER_TAGS = ["@hermit", "/recheck"]
 WATCH_POLL_SECONDS = 5.0
+
+
+def _has_trigger(body: str, trigger_tags: list[str]) -> bool:
+    """Return True when ``body`` contains any configured trigger tag."""
+    body_lower = body.lower()
+    return any(tag.lower() in body_lower for tag in trigger_tags)
 
 
 async def _drain_body(receive: Receive, message: dict) -> None:
@@ -91,16 +97,20 @@ WATCH_RETRY_ATTEMPTS = 5
 WATCH_RETRY_BASE_DELAY = 1.0
 
 
-def parse_github(payload: dict) -> Optional[ChangeEvent]:
+def parse_github(
+    payload: dict, trigger_tags: list[str] | None = None
+) -> Optional[ChangeEvent]:
     """Build a change event from a GitHub webhook payload.
 
-    Handles pull request events and ``@hermit`` issue comments on pull requests.
+    Handles pull request events and triggered issue comments on pull requests.
     Returns ``None`` for payloads that should not trigger a review.
     """
+    if trigger_tags is None:
+        trigger_tags = DEFAULT_TRIGGER_TAGS
     if "pull_request" in payload:
         return _parse_github_pull_request(payload)
     if payload.get("action") == "created" and payload.get("issue"):
-        return _parse_github_comment(payload)
+        return _parse_github_comment(payload, trigger_tags)
     return None
 
 
@@ -128,13 +138,14 @@ def _parse_github_pull_request(payload: dict) -> Optional[ChangeEvent]:
     )
 
 
-def _parse_github_comment(payload: dict) -> Optional[ChangeEvent]:
+def _parse_github_comment(
+    payload: dict, trigger_tags: list[str]
+) -> Optional[ChangeEvent]:
     """Parse a GitHub issue comment that mentions the bot."""
     issue = payload.get("issue") or {}
     comment = payload.get("comment") or {}
-    if (
-        "pull_request" not in issue
-        or BOT_MENTION not in (comment.get("body") or "").lower()
+    if "pull_request" not in issue or not _has_trigger(
+        comment.get("body") or "", trigger_tags
     ):
         return None
     repository = payload.get("repository") or {}
@@ -149,16 +160,20 @@ def _parse_github_comment(payload: dict) -> Optional[ChangeEvent]:
     )
 
 
-def parse_gitlab(payload: dict) -> Optional[ChangeEvent]:
+def parse_gitlab(
+    payload: dict, trigger_tags: list[str] | None = None
+) -> Optional[ChangeEvent]:
     """Build a change event from a GitLab webhook payload.
 
-    Handles merge request events and ``@hermit`` notes on merge requests. Returns
+    Handles merge request events and triggered notes on merge requests. Returns
     ``None`` for payloads that should not trigger a review.
     """
+    if trigger_tags is None:
+        trigger_tags = DEFAULT_TRIGGER_TAGS
     if payload.get("object_kind") == "merge_request":
         return _parse_gitlab_merge_request(payload)
     if payload.get("object_kind") == "note":
-        return _parse_gitlab_note(payload)
+        return _parse_gitlab_note(payload, trigger_tags)
     return None
 
 
@@ -189,12 +204,12 @@ def _parse_gitlab_merge_request(payload: dict) -> Optional[ChangeEvent]:
     )
 
 
-def _parse_gitlab_note(payload: dict) -> Optional[ChangeEvent]:
+def _parse_gitlab_note(payload: dict, trigger_tags: list[str]) -> Optional[ChangeEvent]:
     """Parse a GitLab note on a merge request that mentions the bot."""
     attributes = payload.get("object_attributes") or {}
     if attributes.get("noteable_type") != "MergeRequest":
         return None
-    if BOT_MENTION not in (attributes.get("note") or "").lower():
+    if not _has_trigger(attributes.get("note") or "", trigger_tags):
         return None
     project = payload.get("project") or {}
     merge_request = payload.get("merge_request") or {}
@@ -350,6 +365,7 @@ async def _decode_event(
     provider: str,
     validate: Callable[[bytes], None],
     client: GitClient,
+    trigger_tags: list[str],
 ) -> tuple[Optional[ChangeEvent], Optional[JSONResponse]]:
     """Validate a webhook request and turn it into a change event.
 
@@ -367,7 +383,11 @@ async def _decode_event(
     except (UnicodeDecodeError, json.JSONDecodeError):
         logger.warning("rejected %s webhook with invalid JSON body", provider)
         return None, JSONResponse({"error": "invalid JSON body"}, status_code=400)
-    event = parse_github(payload) if provider == "github" else parse_gitlab(payload)
+    event = (
+        parse_github(payload, trigger_tags)
+        if provider == "github"
+        else parse_gitlab(payload, trigger_tags)
+    )
     if event is None:
         logger.debug("ignoring %s webhook (no review triggered)", provider)
         return None, JSONResponse({"status": "ignored"}, status_code=202)
@@ -688,7 +708,7 @@ async def _post_review(
     return JSONResponse({"status": "ok"}, status_code=200)
 
 
-def create_app(
+def create_app(  # pylint: disable=too-many-locals
     settings: Settings,
     client: GitClient,
     spawner: PodSpawner,
@@ -747,7 +767,9 @@ def create_app(
         if not limiter.allow(request):
             logger.warning("rate limit exceeded for %s", limiter.client_ip(request))
             return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
-        event, error = await _decode_event(request, provider, validate, client)
+        event, error = await _decode_event(
+            request, provider, validate, client, settings.trigger_tags
+        )
         if error is not None:
             return error
         if event is None:
@@ -762,6 +784,19 @@ def create_app(
             track=track,
             client=client,
         )
+
+    @app.get("/")
+    async def root() -> dict:
+        """Return a service directory so users can find the correct webhook URLs."""
+        return {
+            "service": "H.E.R.M.I.T",
+            "version": __version__,
+            "endpoints": {
+                "healthz": "GET /healthz",
+                "github_webhook": "POST /webhook/github",
+                "gitlab_webhook": "POST /webhook/gitlab",
+            },
+        }
 
     @app.get("/healthz")
     async def healthz() -> dict:

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-05
+
+### Added
+
+- ``/recheck`` comment trigger supported alongside ``@hermit``. Any comment
+  containing ``/recheck`` (case-insensitive) now spawns a review. The comment
+  trigger list is configurable via ``HERMIT_TRIGGER_TAGS`` (JSON list in
+  ConfigMap, Helm ``config.triggerTags``). Default: ``["@hermit", "/recheck"]``.
+
 ## [0.2.0] - 2026-08-05
 
 First stable release — the reviewer pipeline now works end-to-end in
@@ -172,7 +181,8 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
-[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...main
+[Unreleased]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.1...main
+[0.2.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.0...v0.2.1
 [0.2.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.1...v0.2.0
 [0.1.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.1.0...v0.1.1
 [0.1.0]: https://gitlab.com/hermit-bot/hermit/-/tags/v0.1.0
