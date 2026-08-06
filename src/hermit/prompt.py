@@ -58,8 +58,7 @@ def build_review_prompt(
         "--- inline diff ---\n"
         f"{diff}\n"
         "--- end inline diff ---\n\n"
-        "Also inspect the full codebase for architecture and design issues "
-        "that the diff alone might not reveal: duplication, layering "
-        "violations, conflicting patterns between components, and orphaned "
-        "references to deleted or renamed symbols."
+        "Inspect related files for consistency — callers, handlers, "
+        "cross-file references — but only when the diff suggests they "
+        "may need updating. Do not audit the entire codebase."
     )
