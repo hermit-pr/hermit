@@ -14,18 +14,20 @@ from hermit.models import ChangeEvent
 
 def make_job(**overrides) -> ReviewJob:
     """Create a test ReviewJob with sensible defaults."""
+    event_override = overrides.pop("event_override", {})
+    event = ChangeEvent(
+        provider=(event_override.get("provider") or "github"),
+        action=(event_override.get("action") or "opened"),
+        repo=(event_override.get("repo") or "owner/repo"),
+        ref=(event_override.get("ref") or "refs/heads/feature/test"),
+        head_sha=(event_override.get("head_sha") or "abc123"),
+        head_ref=(event_override.get("head_ref") or "feature/test"),
+        base_sha=(event_override.get("base_sha") or "def456"),
+        base_ref=(event_override.get("base_ref") or "main"),
+    )
     defaults = {
         "id": "test-job-123",
-        "event": ChangeEvent(
-            provider="github",
-            action="opened",
-            repo="owner/repo",
-            ref="refs/heads/feature/test",
-            head_sha="abc123",
-            head_ref="feature/test",
-            base_sha="def456",
-            base_ref="main",
-        ),
+        "event": event,
         "report_secret": "secret123",
     }
     defaults.update(overrides)
@@ -248,6 +250,32 @@ async def test_k8s_job_secret_is_durable() -> None:
         assert secret.metadata.labels["hermit.job"] == job.id
         assert secret.metadata.annotations["hermit.dev/status"] == "pending"
         assert '"ref":"refs/heads/feature/test"' in secret.string_data["event"]
+
+
+@pytest.mark.asyncio
+async def test_k8s_job_secret_uses_per_org_read_token() -> None:
+    """The job secret resolves the read token from the org map when configured."""
+    settings = make_settings(
+        git_read_token=None,
+        git_read_token_map={"acme": "acme-read-pat"},
+    )
+    job = make_job(
+        event_override={"repo": "acme/app", "ref": "refs/heads/feature/test"}
+    )
+
+    with patch("kubernetes.client.CoreV1Api") as mock_api_class:
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.create_namespaced_secret = MagicMock()
+        mock_api.create_namespaced_pod = MagicMock()
+
+        spawner = K8sPodSpawner(settings)
+        spawner._client = mock_api  # pylint: disable=protected-access
+
+        await spawner.spawn(job, pod_environment(settings, job))
+
+        _, secret = mock_api.create_namespaced_secret.call_args[0]
+        assert secret.string_data["read-token"] == "acme-read-pat"
 
 
 @pytest.mark.asyncio

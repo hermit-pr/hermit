@@ -31,9 +31,11 @@ class GitClient(ABC):
         endpoint: str,
         token: str,
         http: Optional[httpx.AsyncClient] = None,
+        org_tokens: dict[str, str] | None = None,
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self._token = token
+        self._org_tokens = org_tokens or {}
         if http is not None:
             self._http = http
             return
@@ -80,15 +82,45 @@ class GitClient(ABC):
         """
         return True
 
+    def token_for(self, repo: str = "") -> str:
+        """Return the token for *repo*, falling back to the default token.
+
+        When no per-org map is configured, always returns ``self._token``.
+        """
+        if not self._org_tokens:
+            return self._token
+        org = repo.split("/")[0] if repo else ""
+        return self._org_tokens.get(org, self._token)
+
+    def _maybe_override_auth(self, kwargs: dict[str, object], token: str) -> None:
+        """Inject a per-request Authorization header when *token* differs
+        from the default baked into the HTTP client.
+        """
+        if token == self._token:
+            return
+        req_headers: dict[str, str] = {}
+        existing = kwargs.pop("headers", None)
+        if existing is not None:
+            req_headers.update(
+                existing if isinstance(existing, dict) else dict(existing)
+            )
+        req_headers["Authorization"] = f"Bearer {token}"
+        kwargs["headers"] = req_headers
+
     async def _request(
-        self, method: str, path: str, **kwargs: object
+        self, method: str, path: str, *, repo: str = "", **kwargs: object
     ) -> httpx.Response:
         """Perform an HTTP request with retries on transient failures.
 
         Retries on connection errors, timeouts, 429 (honoring ``Retry-After``)
         and 5xx responses with exponential backoff and jitter. Non-retryable
         4xx responses are returned immediately.
+
+        When *repo* is given (e.g. ``"org/repo"``), the Authorization header
+        is resolved from the per-org token map, falling back to the default
+        token.
         """
+        self._maybe_override_auth(kwargs, self.token_for(repo))
         attempt = 0
         while True:
             try:

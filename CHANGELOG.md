@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ``require_commenter_membership`` setting (env ``HERMIT_REQUIRE_COMMENTER_MEMBERSHIP``,
   default ``true``). When ``false``, ``@hermit`` comments from non-members are
   allowed to trigger reviews, bypassing the org/group membership check.
+- Multi-org token support for GitHub Fine-Grained PATs: ``HERMIT_GITHUB_TOKEN_MAP``
+  and ``HERMIT_GIT_READ_TOKEN_MAP`` (JSON ``{"org": "pat", ...}``) resolve the
+  correct PAT per organisation. The existing ``HERMIT_GITHUB_TOKEN`` and
+  ``HERMIT_GIT_READ_TOKEN`` act as fallbacks for unmapped orgs. Helm chart
+  exposes these via ``githubRwToken`` / ``gitReadToken`` blocks with ``token``
+  and ``orgs`` keys.
 
 ### Fixed
 

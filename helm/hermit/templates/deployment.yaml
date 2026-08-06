@@ -39,6 +39,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "hermit.fullname" . }}
+            - secretRef:
+                name: {{ include "hermit.fullname" . }}-tokens
           env:
             {{- if .Values.secrets.webhookSecret.name }}
             - name: HERMIT_WEBHOOK_SECRET
@@ -46,20 +48,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.webhookSecret.name | quote }}
                   key: {{ .Values.secrets.webhookSecret.key | required "secrets.webhookSecret.key is required" | quote }}
-            {{- end }}
-            {{- if .Values.secrets.gitReadToken.name }}
-            - name: HERMIT_GIT_READ_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.gitReadToken.name | quote }}
-                  key: {{ .Values.secrets.gitReadToken.key | required "secrets.gitReadToken.key is required" | quote }}
-            {{- end }}
-            {{- if .Values.secrets.gitRWToken.name }}
-            - name: HERMIT_{{ if eq .Values.config.gitProvider "gitlab" }}GITLAB{{ else }}GITHUB{{ end }}_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.gitRWToken.name | quote }}
-                  key: {{ .Values.secrets.gitRWToken.key | required "secrets.gitRWToken.key is required" | quote }}
             {{- end }}
             {{- if .Values.secrets.vllmApiKey.name }}
             - name: HERMIT_VLLM_API_KEY

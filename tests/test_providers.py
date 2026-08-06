@@ -357,3 +357,53 @@ async def test_gitlab_check_membership_not_found() -> None:
     finally:
         await client.aclose()
     assert member is False
+
+
+def test_token_for_returns_default_without_map() -> None:
+    """token_for returns the default token when no org map is configured."""
+    client = GitHubClient("https://git.example", "token123")
+    assert client.token_for() == "token123"
+    assert client.token_for("acme/repo") == "token123"
+
+
+def test_token_for_resolves_org_from_map() -> None:
+    """token_for returns the org-specific token when it exists in the map."""
+    client = GitHubClient(
+        "https://git.example", "default-token", org_tokens={"acme": "acme-token"}
+    )
+    assert client.token_for("acme/repo") == "acme-token"
+    assert client.token_for("other/repo") == "default-token"
+
+
+def test_token_for_handles_empty_repo() -> None:
+    """token_for returns the default token when repo is empty or has no slash."""
+    client = GitHubClient(
+        "https://git.example", "default-token", org_tokens={"acme": "acme-token"}
+    )
+    assert client.token_for("") == "default-token"
+    assert client.token_for("noorggiven") == "default-token"
+
+
+@pytest.mark.asyncio
+async def test_github_set_commit_status_uses_repo_token() -> None:
+    """set_commit_status resolves the per-org token when a map is configured."""
+    headers_sent: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        headers_sent.append(dict(request.headers))
+        return httpx.Response(201, json={})
+
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://git.example"
+    )
+    client = GitHubClient(
+        "https://git.example", "default", http=http, org_tokens={"acme": "acme-pat"}
+    )
+    try:
+        await client.set_commit_status(
+            _github_event(), "pending", "testing...", "hermit/test"
+        )
+    finally:
+        await client.aclose()
+    assert len(headers_sent) == 1
+    assert headers_sent[0]["authorization"] == "Bearer acme-pat"
