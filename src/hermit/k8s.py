@@ -785,20 +785,21 @@ class K8sPodSpawner(PodSpawner):
                             job_id,
                             exc.status,
                         )
-                try:
-                    await asyncio.to_thread(
-                        api.delete_namespaced_secret,
-                        self._secret_name(job_id),
-                        namespace,
-                    )
-                except kubernetes.client.ApiException as exc:
-                    level = logging.DEBUG if exc.status == 404 else logging.WARNING
-                    logger.log(
-                        level,
-                        "could not delete secret for job %s (status %d)",
-                        job_id,
-                        exc.status,
-                    )
+                else:
+                    try:
+                        await asyncio.to_thread(
+                            api.delete_namespaced_secret,
+                            self._secret_name(job_id),
+                            namespace,
+                        )
+                    except kubernetes.client.ApiException as exc:
+                        level = logging.DEBUG if exc.status == 404 else logging.WARNING
+                        logger.log(
+                            level,
+                            "could not delete secret for job %s (status %d)",
+                            job_id,
+                            exc.status,
+                        )
 
     async def _sweep_secrets(
         self,

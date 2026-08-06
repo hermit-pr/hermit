@@ -132,6 +132,7 @@ async def run_review(settings: SlaveSettings) -> str:
 
 
 _review_posted = [False]
+_slave_settings = [None]
 
 
 def _handle_signal(signum: int, _frame: object) -> None:
@@ -139,15 +140,13 @@ def _handle_signal(signum: int, _frame: object) -> None:
     if _review_posted[0]:
         return
     logger.warning("received signal %d, reporting failure", signum)
-    try:
-        settings = SlaveSettings()
-    except (OSError, ValueError):
-        logger.warning("cannot load settings in signal handler, exiting")
+    if _slave_settings[0] is None:
+        logger.warning("settings not available in signal handler, exiting")
         sys.exit(1)
     report_failure(
-        settings.master_url,
-        settings.job_id,
-        settings.report_secret.get_secret_value(),
+        _slave_settings[0].master_url,
+        _slave_settings[0].job_id,
+        _slave_settings[0].report_secret.get_secret_value(),
         f"terminated by signal {signum}",
     )
     sys.exit(1)
@@ -156,12 +155,20 @@ def _handle_signal(signum: int, _frame: object) -> None:
 def main() -> None:
     """Run a single review and exit with a status code."""
     configure_logging()
+    settings = SlaveSettings()
+    _slave_settings[0] = settings
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
     try:
-        asyncio.run(run_review(SlaveSettings()))
-    except (RuntimeError, ValueError, OSError, httpx.HTTPError):
+        asyncio.run(run_review(settings))
+    except (RuntimeError, ValueError, OSError, httpx.HTTPError) as exc:
         logger.exception("review failed")
+        report_failure(
+            settings.master_url,
+            settings.job_id,
+            settings.report_secret.get_secret_value(),
+            str(exc),
+        )
         raise SystemExit(1) from None
 
 
