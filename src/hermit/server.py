@@ -272,11 +272,28 @@ async def _resolve_durable_state(
             job.error = "reviewer pod failed"
             logger.warning("job %s: pod entered Failed phase", job.id)
         elif phase is None:
-            job.status = "posted"
-            logger.info("job %s: pod and secret already cleaned up", job.id)
+            job.status = "failed"
+            job.error = "pod and durable secret disappeared without completing"
+            logger.warning("job %s: pod and secret already cleaned up", job.id)
         else:
             job.status = "posted"
             logger.info("job %s: pod %s, treating as posted", job.id, phase)
+
+
+async def _set_error_status(
+    job: ReviewJob, client: GitClient, description: str
+) -> None:
+    """Best-effort set an error commit status for a failed review."""
+    if not job.event.head_sha:
+        return
+    try:
+        await client.set_commit_status(
+            job.event, "error", description=description, context="hermit/review"
+        )
+    except httpx.HTTPError:
+        logger.warning(
+            "failed to set error status for %s#%s", job.event.repo, job.event.ref
+        )
 
 
 async def _watch_job(
@@ -304,20 +321,7 @@ async def _watch_job(
                 job.status = "failed"
                 job.error = "review report timed out"
                 logger.warning("job %s timed out after %.0fs", job.id, timeout)
-                if job.event.head_sha:
-                    try:
-                        await client.set_commit_status(
-                            job.event,
-                            "error",
-                            description="Review timed out.",
-                            context="hermit/review",
-                        )
-                    except httpx.HTTPError:
-                        logger.warning(
-                            "failed to set error status for %s#%s",
-                            job.event.repo,
-                            job.event.ref,
-                        )
+                await _set_error_status(job, client, "Review timed out.")
                 break
             durable, retries = await _fetch_durable(job, spawner, retries, remaining)
             if retries > 0:
@@ -326,6 +330,8 @@ async def _watch_job(
                 continue
             await _resolve_durable_state(durable, job, spawner)
             if job.status != "pending":
+                if job.status == "failed":
+                    await _set_error_status(job, client, "Review failed (pod error).")
                 break
             try:
                 await asyncio.wait_for(
