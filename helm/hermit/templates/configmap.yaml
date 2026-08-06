@@ -33,6 +33,7 @@ data:
   HERMIT_RATE_LIMIT_GLOBAL: {{ .Values.config.rateLimitGlobal | quote }}
   HERMIT_RATE_LIMIT_WINDOW_SECONDS: {{ .Values.config.rateLimitWindowSeconds | quote }}
   HERMIT_TRUST_X_FORWARDED_FOR: {{ .Values.config.trustXForwardedFor | quote }}
+  HERMIT_REQUIRE_COMMENTER_MEMBERSHIP: {{ .Values.config.requireCommenterMembership | quote }}
   HERMIT_MAX_BODY_BYTES: {{ int .Values.config.maxBodyBytes | quote }}
   HERMIT_MAX_CONCURRENT_JOBS: {{ .Values.config.maxConcurrentJobs | quote }}
   HERMIT_OPENCODE_TIMEOUT_SECONDS: {{ .Values.config.opencodeTimeoutSeconds | quote }}

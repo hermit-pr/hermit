@@ -569,6 +569,45 @@ async def test_github_comment_from_non_member_is_rejected() -> None:
     assert not store.all()
 
 
+async def test_github_comment_from_non_member_allowed_when_disabled() -> None:
+    """Non-member comment accepted when membership check is disabled."""
+    store = JobStore()
+    spawner = FakePodSpawner()
+    app = create_app(
+        _settings(require_commenter_membership=False),
+        NoMembershipClient(),
+        spawner,
+        store,
+    )
+    payload = {
+        "action": "created",
+        "issue": {
+            "number": 7,
+            "pull_request": {},
+            "html_url": "https://github.example/acme/app/pull/7",
+            "title": "test",
+            "body": "",
+        },
+        "comment": {
+            "body": "please @hermit review",
+            "user": {"login": "mallory"},
+        },
+        "repository": {"full_name": "acme/app"},
+    }
+    async with _client(app) as http:
+        response = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={
+                "X-Hub-Signature-256": _github_signature(json.dumps(payload).encode())
+            },
+        )
+    assert response.status_code == 202
+    jobs = store.all()
+    assert len(jobs) == 1
+    assert jobs[0].event.ref == "7"
+
+
 async def test_max_concurrent_jobs_rejects_excess() -> None:
     """A webhook beyond the concurrency limit is rejected with 503."""
     store = JobStore()
