@@ -59,10 +59,10 @@ def test_settings_splits_opencode_args() -> None:
 
 def test_settings_default_review_rules_define_sections() -> None:
     """The hardcoded default rules ask for the fixed review sections."""
-    assert "Critical changes that need to be fixed" in DEFAULT_REVIEW_RULES
+    assert "Critical issues" in DEFAULT_REVIEW_RULES
     assert "Medium issues" in DEFAULT_REVIEW_RULES
     assert "Low issues" in DEFAULT_REVIEW_RULES
-    assert "General feedback" in DEFAULT_REVIEW_RULES
+    assert "Verdict" in DEFAULT_REVIEW_RULES
 
 
 def test_settings_review_rules_defaults_to_empty() -> None:

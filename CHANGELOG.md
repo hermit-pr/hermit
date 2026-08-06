@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sweeper, preserving the ``failed`` annotation so watchers can discover
   the failure and report it to the PR.
 
+### Changed
+
+- Review prompt redesigned to reduce noise: sections with no findings are now
+  skipped entirely instead of being filled with ``None.``. A mandatory
+  ``## Verdict`` section (Approve / Request changes) replaces the
+  ``## General feedback`` section. The agent is explicitly told not to
+  comment on code that is already correct or handled properly.
+- Policy compliance added as an explicit review criterion: every change is
+  audited against the project ``AGENTS.md`` from the base commit.
+- Codebase inspection scope narrowed from "inspect the full codebase" to
+  "inspect related files when the diff suggests they may need updating".
+
 ## [0.2.8] - 2026-08-06
 
 ### Added
