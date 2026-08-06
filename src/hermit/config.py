@@ -81,6 +81,7 @@ class Settings(_SettingsBase):
     vllm_api_key: SecretStr | None = None
     policy_file_path: str = "AGENTS.md"
     trigger_tags: List[str] = Field(default_factory=lambda: ["@hermit", "/recheck"])
+    require_commenter_membership: bool = True
 
     rate_limit_per_ip: int = 60
     rate_limit_global: int = 600

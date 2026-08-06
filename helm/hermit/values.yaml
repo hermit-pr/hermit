@@ -77,6 +77,10 @@ config:
   rateLimitGlobal: 600
   rateLimitWindowSeconds: 60
   trustXForwardedFor: false
+  # When true (default), @hermit comments are rejected when the commenter is
+  # not a member of the org (GitHub) or group (GitLab). Set to false to allow
+  # non-members to trigger reviews via @hermit comments.
+  requireCommenterMembership: true
 
 # Egress restrictions for reviewer (slave) pods. When enabled, reviewer pods
 # can only reach the master pod, kube-dns, and the configured git host and

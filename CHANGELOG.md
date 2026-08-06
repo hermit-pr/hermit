@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ``require_commenter_membership`` setting (env ``HERMIT_REQUIRE_COMMENTER_MEMBERSHIP``,
+  default ``true``). When ``false``, ``@hermit`` comments from non-members are
+  allowed to trigger reviews, bypassing the org/group membership check.
+
+### Fixed
+
+- Reviewer pod failures (e.g. wrong token, clone errors) no longer leave a
+  perpetual ``pending`` commit status on the PR. The master now sets an
+  ``error`` commit status when the pod enters ``Failed`` phase, and the
+  slave proactively reports failures on unhandled exceptions before exiting.
+- Durable secret for ``Failed`` reviewer pods is no longer deleted by the
+  sweeper, preserving the ``failed`` annotation so watchers can discover
+  the failure and report it to the PR.
+
 ## [0.2.8] - 2026-08-06
 
 ### Added

@@ -385,6 +385,7 @@ async def _decode_event(
     validate: Callable[[bytes], None],
     client: GitClient,
     trigger_tags: list[str],
+    require_commenter_membership: bool = True,
 ) -> tuple[Optional[ChangeEvent], Optional[JSONResponse]]:
     """Validate a webhook request and turn it into a change event.
 
@@ -418,9 +419,23 @@ async def _decode_event(
         event.action,
     )
     if provider == "github" and event.action == "comment":
-        await _authorize_github_commenter(payload, event, client)
+        if require_commenter_membership:
+            await _authorize_github_commenter(payload, event, client)
+        else:
+            logger.info(
+                "membership check disabled; allowing comment for %s#%s",
+                event.repo,
+                event.ref,
+            )
     if provider == "gitlab" and event.action == "comment":
-        await _authorize_gitlab_commenter(payload, event, client)
+        if require_commenter_membership:
+            await _authorize_gitlab_commenter(payload, event, client)
+        else:
+            logger.info(
+                "membership check disabled; allowing comment for %s#%s",
+                event.repo,
+                event.ref,
+            )
     if not event.head_sha:
         try:
             event = await client.resolve_refs(event)
@@ -786,7 +801,12 @@ def create_app(  # pylint: disable=too-many-locals
             logger.warning("rate limit exceeded for %s", limiter.client_ip(request))
             return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
         event, error = await _decode_event(
-            request, provider, validate, client, settings.trigger_tags
+            request,
+            provider,
+            validate,
+            client,
+            settings.trigger_tags,
+            settings.require_commenter_membership,
         )
         if error is not None:
             return error
