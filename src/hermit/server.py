@@ -86,7 +86,7 @@ class _BodyLimitMiddleware:
                 rejected = True
                 response = JSONResponse({"error": "payload too large"}, status_code=413)
                 await response(scope, receive, send)
-                _drain_body(receive, message)
+                await _drain_body(receive, message)
                 return {"type": "http.disconnect"}
             return message
 
@@ -737,12 +737,12 @@ async def _post_review(
             job.event.repo,
             job.event.ref,
         )
-        logger.info(
-            "received review from slave PR #%s repo %s",
-            job.event.ref,
-            job.event.repo,
-        )
-        return JSONResponse({"status": "ok"}, status_code=200)
+    logger.info(
+        "received review from slave PR #%s repo %s",
+        job.event.ref,
+        job.event.repo,
+    )
+    return JSONResponse({"status": "ok"}, status_code=200)
 
 
 def create_app(  # pylint: disable=too-many-locals

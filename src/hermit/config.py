@@ -183,7 +183,10 @@ class Settings(_SettingsBase):
         if isinstance(value, str):
             if not value.strip():
                 return {}
-            return dict(json.loads(value))
+            try:
+                return dict(json.loads(value))
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid JSON in token map: {exc}") from exc
         if isinstance(value, dict):
             return {str(k): str(v) for k, v in value.items()}
         return {}
