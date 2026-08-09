@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AI agent produces fewer false-positive "undefined reference" hallucinations
+  during reviews (#5): the static inline diff has been removed from the prompt
+  (eliminating a dual source-of-truth with the working tree), and the git
+  baseline now always references the *current* target-branch tip instead of a
+  stale fork-point SHA.  The agent is instructed to use
+  ``git diff target-branch...HEAD`` and ``git show target-branch:<path>``
+  for dynamic, context-aware cross-referencing.
 - Reviewer pod failures (e.g. wrong token, clone errors) no longer leave a
   perpetual ``pending`` commit status on the PR. The master now sets an
   ``error`` commit status when the pod enters ``Failed`` phase, and the
