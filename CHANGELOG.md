@@ -45,9 +45,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit explicitly before policy extraction.
 - Helm token Secret only emits keys for configured values instead of
   always writing every key (some of which were empty strings).
+- ``_handle_report`` success path returned no response: the
+  ``return JSONResponse`` was inside the ``except`` block.  When
+  ``set_commit_status`` succeeded, FastAPI received ``None`` and sent a
+  500, causing the slave to report a failure and overwrite the commit
+  status to ``error``.  The return is now after the try/except.
+- 413 rejection no longer leaks the request body: ``_drain_body`` is
+  properly awaited instead of being garbage-collected as an orphaned
+  coroutine.
+- ``X-Forwarded-For`` IP extraction uses the rightmost (trusted) entry
+  instead of the leftmost (trivially spoofed), preventing rate-limit
+  bypass via header manipulation.
+- Malformed ``HERMIT_*_TOKEN_MAP`` JSON now produces a clear
+  ``ValueError`` instead of an unhelpful ``JSONDecodeError`` traceback.
+- Helm post-install ``NOTES.txt`` no longer references non-existent
+  ``secrets.gitRWToken`` / ``secrets.gitReadToken`` paths; updated to
+  ``githubRwToken`` / ``gitlabRwToken`` / ``gitReadToken``.
 
 ### Changed
 
+- All GitLab CI jobs (including SAST and Secret Detection) are now gated
+  to run only on ``v*`` tagged releases via a global ``workflow: rules``
+  directive.
 - Review prompt redesigned to reduce noise: sections with no findings are now
   skipped entirely instead of being filled with ``None.``. A mandatory
   ``## Verdict`` section (Approve / Request changes) replaces the
