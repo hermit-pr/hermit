@@ -26,6 +26,38 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
   - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:3.21.1 template hermit helm/hermit`
 - Diagrams (requires `graphviz`): `dot -Tpng docs/architecture.dot -o docs/architecture.png && dot -Tpng docs/readme-arch.dot -o docs/readme-arch.png`
 
+## Pre-commit verification
+
+**MANDATORY before every commit.** Run the full GitLab CI pipeline and GitHub CI pipeline locally to ensure nothing is broken.
+
+### GitLab CI (lint + test + shell/bash + helm checks)
+
+```bash
+docker run --rm -v "$PWD:/workspace" -w /workspace python:3.14-alpine sh -c "
+apk add --no-cache git shellcheck shfmt helm > /dev/null 2>&1 &&
+pip install --no-cache-dir -e '.[dev]' > /dev/null 2>&1 &&
+echo '=== black ===' && black --check . &&
+echo '=== isort ===' && isort --check-only . &&
+echo '=== flake8 ===' && flake8 src tests &&
+echo '=== pylint ===' && pylint src tests &&
+echo '=== pytest ===' && pytest -v &&
+echo '=== shellcheck ===' && shellcheck docker/entrypoint.sh &&
+echo '=== shfmt ===' && shfmt -i 2 -d docker/entrypoint.sh &&
+echo '=== helm lint ===' && helm lint helm/hermit &&
+helm template hermit helm/hermit > /dev/null && echo 'helm template: OK'
+"
+```
+
+This replicates the single `check` job in `.gitlab-ci.yml`. All checks must pass with zero diff and zero warnings.
+
+### GitHub CI (Docker image build)
+
+```bash
+docker build -f docker/Dockerfile -t hermit .
+```
+
+This replicates the `build` job in `.github/workflows/docker-build.yml`. The image must build without errors.
+
 ## Conventions
 
 - Every Python function/class/module needs a docstring — pylint `C0116` etc. are enforced, so tests too.
@@ -34,10 +66,9 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 
 ## CI constraints
 
-- GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus lint/test/shellcheck/shfmt/helm jobs. Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
-- `docker-build` job only runs when `$CI_REGISTRY_IMAGE` is set. It builds `docker/Dockerfile` and pushes to `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA` on every commit; on git tags (`v*`) it also pushes `$CI_REGISTRY_IMAGE:X.Y.Z` (the `v` prefix is stripped).
-- `helm-package` job packages the Helm chart and pushes to `oci://$CI_REGISTRY_IMAGE/charts`.
-- GitHub mirror: `.github/workflows/docker-build.yml` pushes to `ghcr.io/hermit-pr/hermit` on main commits and semver tags.
+- GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus a single `check` job (lint, test, shellcheck, shfmt, helm lint). Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
+- Docker build and Helm package are handled on the GitHub mirror (`.github/workflows/docker-build.yml`), not on GitLab.
+- GitHub mirror: pushes to `ghcr.io/hermit-pr/hermit` on main commits and semver tags; Helm chart pushed to OCI on tags only.
 
 ## Code Style & Linter Policy
 
