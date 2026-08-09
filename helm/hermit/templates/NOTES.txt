@@ -17,14 +17,14 @@ every PR/MR:
 
 Reviews are also triggered when someone writes "@hermit" in a PR/MR comment.
 
-No tokens are stored in the chart: secrets.webhookSecret, secrets.gitRWToken,
-secrets.gitReadToken (and optional secrets.vllmApiKey) each reference an
-existing Kubernetes Secret by name and key (same namespace). Verify those
+The chart stores RW and read-only tokens in the ``{{ include "hermit.fullname" . }}-tokens``
+Secret. Other secrets (webhookSecret, vllmApiKey, jobIdSigningKey) reference
+existing Kubernetes Secrets by name and key (same namespace). Verify those
 references resolve and hold:
 
 - webhookSecret: matches the secret configured on your webhook,
-- gitRWToken (write): lets the bot post reviews,
-- gitReadToken (read-only): lets reviewer pods clone the repository,
+- githubRwToken / gitlabRwToken: lets the bot post reviews,
+- gitReadToken: lets reviewer pods clone the repository,
 - vllmApiKey (optional): forwarded to your vLLM endpoint by reviewer pods.
 
 H.E.R.M.I.T only ever posts review comments; it never merges or commits.
