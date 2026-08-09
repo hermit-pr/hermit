@@ -6,15 +6,16 @@ import hmac
 import json
 
 import httpx
+import pytest
 from conftest import SECRET, make_settings
 
 from hermit import __version__
 from hermit.config import Settings
-from hermit.jobs import JobStore
+from hermit.jobs import JobStore, ReviewJob
 from hermit.k8s import FakePodSpawner
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
-from hermit.server import create_app, parse_github, parse_gitlab
+from hermit.server import _resolve_durable_state, create_app, parse_github, parse_gitlab
 
 
 class FakeClient(GitClient):
@@ -635,3 +636,36 @@ async def test_max_concurrent_jobs_rejects_excess() -> None:
             statuses.append(response.status_code)
     assert statuses == [202, 202, 503]
     assert len(store.all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_durable_state_keeps_polling_when_missing() -> None:
+    """When pod and secret are both gone, leave status unchanged —
+    so the watcher keeps polling on the next iteration."""
+    job = ReviewJob(
+        id="test-job",
+        event=ChangeEvent(provider="github", action="", repo="x/y", ref="1"),
+        report_secret="secret",
+    )
+    spawner = FakePodSpawner()
+    # Pod and secret not registered → get_job returns None, get_pod_phase returns None
+
+    await _resolve_durable_state(None, job, spawner)
+    assert job.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_resolve_durable_state_fails_on_explicit_pod_failure() -> None:
+    """When the pod is in Failed phase, set job status to failed."""
+    job = ReviewJob(
+        id="test-job",
+        event=ChangeEvent(provider="github", action="", repo="x/y", ref="1"),
+        report_secret="secret",
+    )
+    spawner = FakePodSpawner()
+    spawner.jobs[job.id] = job
+    await spawner.mark_failed(job.id)
+
+    await _resolve_durable_state(None, job, spawner)
+    assert job.status == "failed"
+    assert "reviewer pod failed" in (job.error or "")

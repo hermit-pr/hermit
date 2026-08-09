@@ -260,7 +260,15 @@ async def _resolve_durable_state(
     job: ReviewJob,
     spawner: PodSpawner,
 ) -> None:
-    """Set *job.status* based on the durable secret and pod phase."""
+    """Set *job.status* based on the durable secret and pod phase.
+
+    When both the durable secret and the pod are missing the status is
+    left unchanged — an external cluster cleaner may have removed them
+    prematurely, so the watcher keeps polling on the next iteration.
+    The *report_timeout* deadline is enforced by the caller
+    (``_watch_job``), which breaks out of the polling loop when it
+    expires.
+    """
     if durable is not None and durable.status in ("completed", "posted", "failed"):
         job.status = durable.status
         logger.info("job %s finished; cleaning up", job.id)
@@ -271,11 +279,7 @@ async def _resolve_durable_state(
             job.status = "failed"
             job.error = "reviewer pod failed"
             logger.warning("job %s: pod entered Failed phase", job.id)
-        elif phase is None:
-            job.status = "failed"
-            job.error = "pod and durable secret disappeared without completing"
-            logger.warning("job %s: pod and secret already cleaned up", job.id)
-        else:
+        elif phase is not None:
             job.status = "posted"
             logger.info("job %s: pod %s, treating as posted", job.id, phase)
 

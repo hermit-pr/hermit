@@ -49,8 +49,8 @@ def _resolve_rw_token(
 
     When only a token map is configured (no global fallback), the client still
     needs a default token string for construction.  The first mapped value is
-    used — it is never actually sent because every request is routed through
-    the per-org resolver.
+    used — it serves as a fallback for unmapped organisations and malformed
+    repo names (no ``/`` separator).
     """
     if token is not None:
         return token.get_secret_value()

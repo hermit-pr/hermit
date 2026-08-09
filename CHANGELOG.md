@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Durable secret for ``Failed`` reviewer pods is no longer deleted by the
   sweeper, preserving the ``failed`` annotation so watchers can discover
   the failure and report it to the PR.
+- Missing pods and durable secrets during the watch loop no longer
+  immediately finalise the job as ``failed``.  When the report deadline
+  hasn't expired yet the watcher keeps polling, avoiding false failures
+  caused by external cluster cleaners that removed the resources
+  prematurely.
+- Dead ``base_sha`` fetch removed from ``clone_and_diff``.  The
+  ``ensure_commit`` helper now handles fetching the point-in-time base
+  commit explicitly before policy extraction.
+- Helm token Secret only emits keys for configured values instead of
+  always writing every key (some of which were empty strings).
 
 ### Changed
 

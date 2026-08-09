@@ -15,6 +15,7 @@ from hermit.git import (
     askpass_env,
     authenticated_url,
     clone_and_diff,
+    ensure_commit,
     extract_policy,
     write_askpass,
 )
@@ -61,20 +62,21 @@ async def run_review(settings: SlaveSettings) -> str:
         repo_dir,
         settings.base_ref,
         settings.head_ref,
-        base_sha=settings.base_sha,
         head_sha=settings.head_sha,
         pr_number=settings.ref if settings.git_provider == "github" else "",
         head_source_url=head_source_url,
         env=env,
     )
-    try:
-        os.remove(askpass_path)
-    except OSError:
-        pass
     if not diff.strip():
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
     policy_path = os.path.join(workspace, "policy.md")
+    if settings.base_sha:
+        await asyncio.to_thread(ensure_commit, repo_dir, settings.base_sha, env=env)
+    try:
+        os.remove(askpass_path)
+    except OSError:
+        pass
     await asyncio.to_thread(
         extract_policy,
         repo_dir,

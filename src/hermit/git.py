@@ -126,7 +126,6 @@ def clone_and_diff(
     base_ref: str,
     head_ref: str,
     *,
-    base_sha: str = "",
     head_sha: str = "",
     pr_number: str = "",
     head_source_url: str = "",
@@ -165,21 +164,6 @@ def clone_and_diff(
         ],
         env=env,
     )
-    if base_sha:
-        _run(
-            [
-                "git",
-                "-C",
-                str(directory),
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                "--",
-                base_sha,
-            ],
-            env=env,
-        )
     if provider == "github" and pr_number:
         _run(
             [
@@ -253,6 +237,33 @@ def clone_and_diff(
         ["git", "-C", str(directory), "diff", "--no-color", TARGET_TAG],
         env=env,
         max_bytes=MAX_DIFF_BYTES,
+    )
+
+
+def ensure_commit(
+    repo_dir: str, sha: str, *, env: dict[str, str] | None = None
+) -> None:
+    """Fetch *sha* from origin so it is present in *repo_dir*.
+
+    Used by the policy-extraction path so that ``git show <sha>:<path>``
+    works when the sha differs from the target-branch tip fetched by
+    ``clone_and_diff``.
+    """
+    if not sha.strip():
+        return
+    _run(
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "fetch",
+            "--depth",
+            "1",
+            "origin",
+            "--",
+            sha.strip(),
+        ],
+        env=env,
     )
 
 
