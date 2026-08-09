@@ -639,8 +639,9 @@ async def test_max_concurrent_jobs_rejects_excess() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_durable_state_keeps_polling_with_remaining_time() -> None:
-    """When pod and secret are gone but time remains, keep polling."""
+async def test_resolve_durable_state_keeps_polling_when_missing() -> None:
+    """When pod and secret are both gone, leave status unchanged —
+    so the watcher keeps polling on the next iteration."""
     job = ReviewJob(
         id="test-job",
         event=ChangeEvent(provider="github", action="", repo="x/y", ref="1"),
@@ -649,29 +650,22 @@ async def test_resolve_durable_state_keeps_polling_with_remaining_time() -> None
     spawner = FakePodSpawner()
     # Pod and secret not registered → get_job returns None, get_pod_phase returns None
 
-    # Time remaining — should leave status unchanged (pending).
-    await _resolve_durable_state(None, job, spawner, remaining=60.0)
+    await _resolve_durable_state(None, job, spawner)
     assert job.status == "pending"
-
-    # No time remaining — should fail.
-    await _resolve_durable_state(None, job, spawner, remaining=-1.0)
-    assert job.status == "failed"
-    assert "pod and durable secret disappeared" in (job.error or "")
 
 
 @pytest.mark.asyncio
 async def test_resolve_durable_state_fails_on_explicit_pod_failure() -> None:
-    """When the pod is in Failed phase, fail regardless of remaining time."""
+    """When the pod is in Failed phase, set job status to failed."""
     job = ReviewJob(
         id="test-job",
         event=ChangeEvent(provider="github", action="", repo="x/y", ref="1"),
         report_secret="secret",
     )
     spawner = FakePodSpawner()
-    # Register the job so get_pod_phase returns something, then mark it failed.
     spawner.jobs[job.id] = job
     await spawner.mark_failed(job.id)
 
-    await _resolve_durable_state(None, job, spawner, remaining=60.0)
+    await _resolve_durable_state(None, job, spawner)
     assert job.status == "failed"
     assert "reviewer pod failed" in (job.error or "")
