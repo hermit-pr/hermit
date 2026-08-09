@@ -65,7 +65,7 @@ jobs:
       - name: Extract release notes from CHANGELOG
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          awk "/^## \[${VERSION}\]/,/^## \[/" CHANGELOG.md | sed '$d' > release-notes.md
+          awk "/^## \\[${VERSION}\\]/,/^## \\[/" CHANGELOG.md | sed '$d' > release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
