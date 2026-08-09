@@ -15,7 +15,15 @@ from hermit.jobs import JobStore, ReviewJob
 from hermit.k8s import FakePodSpawner
 from hermit.models import ChangeEvent
 from hermit.providers.base import GitClient
-from hermit.server import _resolve_durable_state, create_app, parse_github, parse_gitlab
+from hermit.ratelimit import RateLimiter
+from hermit.server import _drain_body as drain_body
+from hermit.server import (
+    _post_review,
+    _resolve_durable_state,
+    create_app,
+    parse_github,
+    parse_gitlab,
+)
 
 
 class FakeClient(GitClient):
@@ -669,3 +677,67 @@ async def test_resolve_durable_state_fails_on_explicit_pod_failure() -> None:
     await _resolve_durable_state(None, job, spawner)
     assert job.status == "failed"
     assert "reviewer pod failed" in (job.error or "")
+
+
+@pytest.mark.asyncio
+async def test_post_review_returns_200_on_success() -> None:
+    """_post_review returns 200 when everything succeeds — regression for #1."""
+    client = FakeClient()
+    spawner = FakePodSpawner()
+    job = ReviewJob(
+        id="test-job",
+        event=ChangeEvent(
+            provider="github",
+            action="opened",
+            repo="x/y",
+            ref="1",
+            head_sha="abc123",
+        ),
+        report_secret="secret",
+    )
+    spawner.jobs[job.id] = job
+
+    response = await _post_review(job, job.id, "review body here", spawner, client)
+    assert response.status_code == 200
+    assert response.body == b'{"status":"ok"}'
+    assert job.status == "completed"
+    assert client.posted == ["review body here"]
+    assert "success" in client.statuses
+
+
+@pytest.mark.asyncio
+async def test_drain_body_is_awaitable() -> None:
+    """_drain_body is an async function and can be awaited without error."""
+
+    async def _fake_receive() -> dict:
+        return {"type": "http.request", "body": b"extra", "more_body": False}
+
+    message: dict = {}
+    await drain_body(_fake_receive, message)
+
+
+def test_xff_uses_rightmost_entry() -> None:
+    """X-Forwarded-For selects the rightmost (trusted) proxy entry."""
+    limiter = RateLimiter(trust_x_forwarded_for=True)
+
+    class _FakeRequest:
+        headers: dict[str, str] = {
+            "x-forwarded-for": "spoofed, real-client, trusted-proxy"
+        }
+        client = None
+
+    assert limiter.client_ip(_FakeRequest()) == "trusted-proxy"
+
+
+def test_xff_uses_direct_ip_when_header_absent() -> None:
+    """When X-Forwarded-For is missing, fall back to client.host."""
+
+    class _FakeClientAddr:
+        host = "10.0.0.1"
+
+    class _FakeRequest:
+        headers: dict[str, str] = {}
+        client = _FakeClientAddr()
+
+    limiter = RateLimiter(trust_x_forwarded_for=True)
+    assert limiter.client_ip(_FakeRequest()) == "10.0.0.1"
