@@ -27,7 +27,7 @@ class GitHubClient(GitClient):
         path = f"/repos/{event.repo}/pulls/{event.ref}/reviews"
         payload = {"body": body, "event": "COMMENT", "commit_id": event.head_sha}
         logger.info("posting review on %s %s/%s", self.endpoint, event.repo, event.ref)
-        response = await self._request("POST", path, json=payload)
+        response = await self._request("POST", path, json=payload, repo=event.repo)
         response.raise_for_status()
 
     async def set_commit_status(
@@ -45,14 +45,14 @@ class GitHubClient(GitClient):
         logger.debug(
             "setting commit status %s on %s/%s", state, event.repo, event.head_sha[:8]
         )
-        response = await self._request("POST", path, json=payload)
+        response = await self._request("POST", path, json=payload, repo=event.repo)
         response.raise_for_status()
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fetch the pull request to fill in the head/base refs."""
         path = f"/repos/{event.repo}/pulls/{event.ref}"
         logger.debug("resolving refs for %s/%s", event.repo, event.ref)
-        response = await self._request("GET", path)
+        response = await self._request("GET", path, repo=event.repo)
         response.raise_for_status()
         pull = response.json()
         head = pull.get("head") or {}
@@ -82,7 +82,7 @@ class GitHubClient(GitClient):
         scope) to handle outside collaborators.
         """
         path = f"/orgs/{org}/members/{username}"
-        response = await self._request("GET", path)
+        response = await self._request("GET", path, repo=org)
         if response.status_code in (200, 204):
             return True
         if response.status_code == 404:
@@ -114,7 +114,7 @@ class GitHubClient(GitClient):
         This works for both org members and outside collaborators.
         """
         path = f"/repos/{repo}/collaborators/{username}"
-        response = await self._request("GET", path)
+        response = await self._request("GET", path, repo=repo)
         if response.status_code == 204:
             return True
         if response.status_code == 404:

@@ -73,13 +73,28 @@ def test_settings_review_rules_defaults_to_empty() -> None:
 def test_github_provider_requires_github_token() -> None:
     """Settings for the GitHub provider without a token are rejected."""
     with pytest.raises(ValidationError):
-        make_settings(git_provider="github", github_token=None)
+        make_settings(git_provider="github", github_token=None, git_read_token=None)
+
+
+def test_github_provider_accepts_token_map() -> None:
+    """GitHub provider can use a token map instead of a global token."""
+    settings = make_settings(
+        git_provider="github",
+        github_token=None,
+        github_token_map={"acme": "ghp_test123"},
+        git_read_token=None,
+        git_read_token_map={"acme": "ghp_read456"},
+    )
+    assert settings.github_token is None
+    assert settings.github_token_map == {"acme": "ghp_test123"}
+    assert settings.git_read_token is None
+    assert settings.git_read_token_map == {"acme": "ghp_read456"}
 
 
 def test_gitlab_provider_requires_gitlab_token() -> None:
     """Settings for the GitLab provider without a token are rejected."""
     with pytest.raises(ValidationError):
-        make_settings(git_provider="gitlab", gitlab_token=None)
+        make_settings(git_provider="gitlab", gitlab_token=None, git_read_token=None)
 
 
 def test_max_concurrent_jobs_default() -> None:

@@ -4,6 +4,7 @@ H.E.R.M.I.T reads its configuration from environment variables prefixed with
 ``HERMIT_``. A local ``.env`` file is also supported for development.
 """
 
+import json
 import shlex
 from functools import lru_cache
 from typing import List, Literal
@@ -84,7 +85,10 @@ class Settings(_SettingsBase):
 
     github_token: SecretStr | None = None
     gitlab_token: SecretStr | None = None
-    git_read_token: SecretStr
+    git_read_token: SecretStr | None = None
+
+    github_token_map: dict[str, str] = Field(default_factory=dict)
+    git_read_token_map: dict[str, str] = Field(default_factory=dict)
 
     webhook_secret: SecretStr = Field(..., min_length=16)
     job_id_signing_key: SecretStr | None = None
@@ -150,15 +154,39 @@ class Settings(_SettingsBase):
     @model_validator(mode="after")
     def _validate_tokens(self) -> "Settings":
         """Fail fast when the token for the configured provider is missing."""
-        if self.git_provider == "github" and not self.github_token:
-            raise ValueError(
-                "HERMIT_GITHUB_TOKEN is required when git_provider is 'github'"
-            )
-        if self.git_provider == "gitlab" and not self.gitlab_token:
-            raise ValueError(
-                "HERMIT_GITLAB_TOKEN is required when git_provider is 'gitlab'"
-            )
+        if self.git_provider == "github":
+            if not self.github_token and not self.github_token_map:
+                raise ValueError(
+                    "HERMIT_GITHUB_TOKEN or HERMIT_GITHUB_TOKEN_MAP is required "
+                    "when git_provider is 'github'"
+                )
+            if not self.git_read_token and not self.git_read_token_map:
+                raise ValueError(
+                    "HERMIT_GIT_READ_TOKEN or HERMIT_GIT_READ_TOKEN_MAP is "
+                    "required when git_provider is 'github'"
+                )
+        if self.git_provider == "gitlab":
+            if not self.gitlab_token:
+                raise ValueError(
+                    "HERMIT_GITLAB_TOKEN is required when git_provider is 'gitlab'"
+                )
+            if not self.git_read_token:
+                raise ValueError(
+                    "HERMIT_GIT_READ_TOKEN is required when git_provider is 'gitlab'"
+                )
         return self
+
+    @field_validator("github_token_map", "git_read_token_map", mode="before")
+    @classmethod
+    def _parse_token_map(cls, value: object) -> dict[str, str]:
+        """Parse a JSON string token map from an environment variable."""
+        if isinstance(value, str):
+            if not value.strip():
+                return {}
+            return dict(json.loads(value))
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+        return {}
 
 
 class SlaveSettings(_SettingsBase):

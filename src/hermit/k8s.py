@@ -252,6 +252,15 @@ class K8sPodSpawner(PodSpawner):
 
     def _build_secret(self, job: ReviewJob, namespace: str) -> object:
         """Build the durable Kubernetes Secret for a review job."""
+        org = job.event.repo.split("/")[0] if "/" in job.event.repo else ""
+        read_token = self._settings.git_read_token
+        read_token_map = self._settings.git_read_token_map
+        if read_token_map and org in read_token_map:
+            token_value = read_token_map[org]
+        elif read_token is not None:
+            token_value = read_token.get_secret_value()
+        else:
+            token_value = ""
 
         return kubernetes.client.V1Secret(
             metadata=kubernetes.client.V1ObjectMeta(
@@ -269,7 +278,7 @@ class K8sPodSpawner(PodSpawner):
             ),
             type="Opaque",
             string_data={
-                "read-token": self._settings.git_read_token.get_secret_value(),
+                "read-token": token_value,
                 "report-secret": job.report_secret,
                 "event": job.event.model_dump_json(),
                 **(
