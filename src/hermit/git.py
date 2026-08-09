@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
-BASE_TAG = "base-sha"
+TARGET_TAG = "target-branch"
 MAX_DIFF_BYTES = 100 * 1024 * 1024
 
 
@@ -132,27 +132,54 @@ def clone_and_diff(
     head_source_url: str = "",
     env: dict[str, str] | None = None,
 ) -> str:
-    """Clone a repository and diff the exact base against the head.
+    """Clone a repository and diff the PR head against the current target branch.
 
-    The repository is initialised empty and two shallow, depth-1 fetches pull
-    the exact base commit and the head commit. The base commit is tagged
-    ``base-sha`` so ``git diff base-sha`` always reflects the precise PR diff
-    even if the target branch moved after the webhook fired.
+    The repository is initialised empty then shallow fetches pull the latest
+    target-branch tip and the head commit.  The target branch is tagged
+    ``target-branch`` and ``git diff target-branch`` (single-ref, comparing
+    the working tree against the tag) isolates the PR's changes.  Because the
+    tag always points at the current target-branch tip rather than a
+    point-in-time fork sha, the diff is not polluted with upstream additions
+    that arrived after the fork point, avoiding false-positive
+    ``undefined reference`` hallucinations.
 
-    ``pr_number`` (GitHub) makes the head fetch use ``refs/pull/<n>/head`` so
-    that pull requests from forks are supported. ``head_source_url`` (GitLab)
-    makes the head fetch come from the fork project for cross-project merge
-    requests. Exact SHAs take priority over branch names.
+    ``pr_number`` (GitHub) makes the head fetch use ``refs/pull/<n>/head``.
+    ``head_source_url`` (GitLab) fetches from the fork for cross-project MRs.
+    Exact SHAs take priority over branch names for the head.
     """
     directory = Path(repo_dir)
     directory.mkdir(parents=True, exist_ok=True)
     _run(["git", "init", "-q", str(directory)], env=env)
     _run(["git", "-C", str(directory), "remote", "add", "origin", source_url], env=env)
-    base = base_sha or f"refs/heads/{base_ref}"
     _run(
-        ["git", "-C", str(directory), "fetch", "--depth", "1", "origin", "--", base],
+        [
+            "git",
+            "-C",
+            str(directory),
+            "fetch",
+            "--depth",
+            "1",
+            "origin",
+            "--",
+            f"refs/heads/{base_ref}",
+        ],
         env=env,
     )
+    if base_sha:
+        _run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                "--",
+                base_sha,
+            ],
+            env=env,
+        )
     if provider == "github" and pr_number:
         _run(
             [
@@ -210,10 +237,20 @@ def clone_and_diff(
             env=env,
         )
     _run(["git", "-C", str(directory), "checkout", "-q", "FETCH_HEAD"], env=env)
-    base_object = base_sha or f"refs/remotes/origin/{base_ref}"
-    _run(["git", "-C", str(directory), "tag", "-f", BASE_TAG, base_object], env=env)
+    _run(
+        [
+            "git",
+            "-C",
+            str(directory),
+            "tag",
+            "-f",
+            TARGET_TAG,
+            f"refs/remotes/origin/{base_ref}",
+        ],
+        env=env,
+    )
     return _run(
-        ["git", "-C", str(directory), "diff", "--no-color", BASE_TAG],
+        ["git", "-C", str(directory), "diff", "--no-color", TARGET_TAG],
         env=env,
         max_bytes=MAX_DIFF_BYTES,
     )
