@@ -35,7 +35,7 @@ def test_authenticated_url_uses_gitlab_username() -> None:
     assert url == "https://oauth2@git.example.com/acme/app.git"
 
 
-def test_build_review_prompt_includes_rules_and_diff() -> None:
+def test_build_review_prompt_includes_rules_and_instructions() -> None:
     """The prompt carries PR context, diff instructions, and cross-ref guidance."""
     prompt = build_review_prompt(
         "github",
@@ -275,7 +275,6 @@ def test_clone_and_diff_uses_current_target_branch() -> None:
         (origin / "file.txt").write_text("line1\n", encoding="utf-8")
         _run_git(["git", "add", "."], origin)
         _run_git(["git", "commit", "-m", "commit 1 (fork point)"], origin)
-        fork_point = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
         _run_git(["git", "checkout", "-b", "feature"], origin)
         (origin / "file.txt").write_text("line1\npr-line\n", encoding="utf-8")
         _run_git(["git", "commit", "-am", "pr addition"], origin)
@@ -286,7 +285,6 @@ def test_clone_and_diff_uses_current_target_branch() -> None:
         )
         _run_git(["git", "add", "."], origin)
         _run_git(["git", "commit", "-m", "commit 2 (post-fork upstream)"], origin)
-        base_sha_latest = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
 
         workspace = Path(tmp) / "workspace"
         workspace.mkdir()
@@ -303,7 +301,6 @@ def test_clone_and_diff_uses_current_target_branch() -> None:
             str(repo_dir),
             "main",
             "feature",
-            base_sha=fork_point,
             head_sha=head_sha,
         )
         assert "+pr-line" in diff
@@ -319,7 +316,6 @@ def test_clone_and_diff_uses_current_target_branch() -> None:
             str(repo_dir2),
             "main",
             "feature",
-            base_sha=base_sha_latest,
             head_sha=head_sha,
         )
         assert diff == diff2

@@ -259,8 +259,16 @@ async def _resolve_durable_state(
     durable: Optional[ReviewJob],
     job: ReviewJob,
     spawner: PodSpawner,
+    remaining: float,
 ) -> None:
-    """Set *job.status* based on the durable secret and pod phase."""
+    """Set *job.status* based on the durable secret and pod phase.
+
+    *remaining* is the time (in seconds) until the report deadline.  When
+    both the durable secret and the pod are missing but the deadline
+    hasn't passed yet the status is left unchanged — an external cluster
+    cleaner may have removed them prematurely, so the watcher will keep
+    polling on the next iteration.
+    """
     if durable is not None and durable.status in ("completed", "posted", "failed"):
         job.status = durable.status
         logger.info("job %s finished; cleaning up", job.id)
@@ -272,9 +280,10 @@ async def _resolve_durable_state(
             job.error = "reviewer pod failed"
             logger.warning("job %s: pod entered Failed phase", job.id)
         elif phase is None:
-            job.status = "failed"
-            job.error = "pod and durable secret disappeared without completing"
-            logger.warning("job %s: pod and secret already cleaned up", job.id)
+            if remaining <= 0:
+                job.status = "failed"
+                job.error = "pod and durable secret disappeared without completing"
+                logger.warning("job %s: pod and secret already cleaned up", job.id)
         else:
             job.status = "posted"
             logger.info("job %s: pod %s, treating as posted", job.id, phase)
@@ -328,7 +337,7 @@ async def _watch_job(
                 if retries >= WATCH_RETRY_ATTEMPTS:
                     break
                 continue
-            await _resolve_durable_state(durable, job, spawner)
+            await _resolve_durable_state(durable, job, spawner, remaining)
             if job.status != "pending":
                 if job.status == "failed":
                     await _set_error_status(job, client, "Review failed (pod error).")
