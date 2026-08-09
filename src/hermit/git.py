@@ -249,7 +249,7 @@ def ensure_commit(
     works when the sha differs from the target-branch tip fetched by
     ``clone_and_diff``.
     """
-    if not sha:
+    if not sha.strip():
         return
     _run(
         [
@@ -261,7 +261,7 @@ def ensure_commit(
             "1",
             "origin",
             "--",
-            sha,
+            sha.strip(),
         ],
         env=env,
     )

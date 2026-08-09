@@ -193,6 +193,8 @@ class FakePodSpawner(PodSpawner):
         job = self.jobs.get(job_id)
         if job is None:
             return None
+        if job.status == "failed":
+            return "Failed"
         return "Running" if job.status == "pending" else "Succeeded"
 
     async def list_active_job_ids(self) -> list[str]:

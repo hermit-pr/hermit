@@ -15,6 +15,7 @@ from hermit.git import (
     clone_and_diff,
     clone_repository,
     diff_between,
+    ensure_commit,
     extract_policy,
     fetch_refs,
 )
@@ -361,6 +362,66 @@ def test_extract_policy_returns_false_when_absent() -> None:
         got = extract_policy(str(origin), base_sha, str(destination), "AGENTS.md")
         assert got is False
         assert not destination.exists()
+
+
+def test_ensure_commit_noop_on_empty_sha() -> None:
+    """ensure_commit returns silently when sha is empty."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ensure_commit(tmp, "")
+        ensure_commit(tmp, "\n  ")
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed on this host"
+)
+def test_ensure_commit_fetches_missing_sha() -> None:
+    """ensure_commit fetches a sha that is not yet in the repository."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "file.txt").write_text("line1\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "first"], origin)
+        first_sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+        (origin / "file.txt").write_text("line1\nline2\n", encoding="utf-8")
+        _run_git(["git", "commit", "-am", "second"], origin)
+
+        repo_dir = str(Path(tmp) / "repo")
+        clone_repository(str(origin), repo_dir)
+        # The clone has no objects — only the remote reference.
+        ensure_commit(repo_dir, first_sha)
+        # Now first_sha should be reachable.
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "cat-file", "-e", first_sha],
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0
+
+
+def test_ensure_commit_in_whitespace_sha() -> None:
+    """ensure_commit strips whitespace from sha."""
+    with tempfile.TemporaryDirectory() as tmp:
+        origin = Path(tmp) / "origin"
+        _run_git(["git", "init", "-b", "main", str(origin)])
+        _run_git(["git", "config", "user.email", "test@example.com"], origin)
+        _run_git(["git", "config", "user.name", "test"], origin)
+        (origin / "file.txt").write_text("x\n", encoding="utf-8")
+        _run_git(["git", "add", "."], origin)
+        _run_git(["git", "commit", "-m", "base"], origin)
+        sha = _run_git(["git", "rev-parse", "HEAD"], origin).strip()
+
+        repo_dir = str(Path(tmp) / "repo")
+        clone_repository(str(origin), repo_dir)
+        ensure_commit(repo_dir, f"  {sha}  ")
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "cat-file", "-e", sha],
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0
 
 
 def _run_git(args: list[str], cwd: Path | None = None) -> str:
