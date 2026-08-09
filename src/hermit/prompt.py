@@ -15,7 +15,6 @@ def build_review_prompt(
     provider: str,
     repo: str,
     ref: str,
-    diff: str,
     *,
     pr_title: str = "",
     pr_body: str = "",
@@ -27,8 +26,12 @@ def build_review_prompt(
 
     The review rules and output format are defined in the ``hermit-reviewer``
     agent system prompt (``opencode.json``).  This function only assembles the
-    PR context: title, description, diff, secret scan results, and policy
+    PR context: title, description, secret scan results, and policy
     instructions.
+
+    The inline diff is deliberately omitted so the agent queries the diff
+    dynamically — there is a single source of truth and no stale text to
+    mislead cross-file validation.
     """
     candidates = secret_candidates or []
     secret_block = "\n".join(f"- {_neutralize(candidate)}" for candidate in candidates)
@@ -49,16 +52,16 @@ def build_review_prompt(
         f" — {_neutralize(pr_title)}\n"
         f"{_neutralize(pr_body)}\n\n"
         f"{policy_instruction}"
-        "Run `git diff base-sha` to see every changed line. "
-        "The repository is checked out in your working directory; "
-        "the base commit is tagged `base-sha`.\n\n"
-        "Secret scan candidates from the diff — classify each as "
-        "[TRUE POSITIVE] or [FALSE POSITIVE]:\n"
-        f"{secret_block}\n\n"
-        "--- inline diff ---\n"
-        f"{diff}\n"
-        "--- end inline diff ---\n\n"
+        "The target branch is tagged `target-branch`. "
+        "Run `git diff target-branch...HEAD` to see every line the pull "
+        "request changed relative to the current target branch. "
         "Inspect related files for consistency — callers, handlers, "
         "cross-file references — but only when the diff suggests they "
-        "may need updating. Do not audit the entire codebase."
+        "may need updating. "
+        "Use `git show target-branch:<path>` to check how a file looks on "
+        "the target branch when verifying that referenced symbols exist. "
+        "Do not audit the entire codebase.\n\n"
+        "Secret scan candidates from the diff — classify each as "
+        "[TRUE POSITIVE] or [FALSE POSITIVE]:\n"
+        f"{secret_block}"
     )

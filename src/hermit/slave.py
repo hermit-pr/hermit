@@ -87,7 +87,6 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.git_provider,
         settings.repo,
         settings.ref,
-        diff,
         pr_title=settings.pr_title,
         pr_body=settings.pr_body,
         secret_candidates=scan_for_secrets(diff),
