@@ -105,3 +105,11 @@ def test_max_concurrent_jobs_default() -> None:
 def test_opencode_timeout_default() -> None:
     """The default opencode subprocess timeout is 900 seconds."""
     assert make_settings().opencode_timeout_seconds == 900
+
+
+def test_token_map_rejects_malformed_json() -> None:
+    """A malformed token map JSON string produces a clear ValueError."""
+    with pytest.raises(ValueError, match="Invalid JSON"):
+        make_settings(
+            github_token_map='{"acme": "token"',  # missing closing brace
+        )
