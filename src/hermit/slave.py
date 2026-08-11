@@ -20,7 +20,7 @@ from hermit.git import (
     write_askpass,
 )
 from hermit.logging_config import configure_logging
-from hermit.opencode import OpenCodeRunner
+from hermit.opencode import OpenCodeRunner, extract_json_verdict
 from hermit.prompt import build_review_prompt
 from hermit.report import report_failure, report_review
 from hermit.secretscan import scan_for_secrets
@@ -114,22 +114,27 @@ async def run_review(settings: SlaveSettings) -> str:
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
     logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
-    match = re.search(r"^##\s+", output, re.MULTILINE)
-    if match:
-        output = output[match.start() :]
+    markdown = extract_json_verdict(output)
+    if markdown is not None:
+        output = markdown
+        logger.info("parsed JSON verdict (%d bytes)", len(output))
+    else:
+        logger.info("no valid JSON found, falling back to heading strip")
+        match = re.search(r"^#+\s+", output, re.MULTILINE)
+        if match:
+            output = output[match.start() :]
     header = (
         f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
     )
-    body = header + output
 
     await report_review(
         settings.master_url,
         settings.job_id,
         settings.report_secret.get_secret_value(),
-        body,
+        header + output,
     )
     _review_posted[0] = True
-    return body
+    return header + output
 
 
 _review_posted = [False]

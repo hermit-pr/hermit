@@ -87,6 +87,38 @@ def extract_text(stdout: str) -> str:
     return result
 
 
+def extract_json_verdict(output: str) -> str | None:
+    """Parse the last JSON code block from *output* and reformat as markdown.
+
+    Returns ``None`` if no valid JSON with a ``verdict`` key is found, so
+    callers can fall back to heading-strip behaviour.
+    """
+    blocks = re.findall(r"```json\s*(.*?)\s*```", output, re.DOTALL)
+    if not blocks:
+        return None
+    try:
+        data = json.loads(blocks[-1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or "verdict" not in data:
+        return None
+    lines: list[str] = []
+    for severity in ("critical", "medium", "low"):
+        findings = data.get(severity, [])
+        if not findings:
+            continue
+        lines.append(f"## {severity.capitalize()} issues\n")
+        for finding in findings:
+            if isinstance(finding, dict):
+                lines.append(
+                    f"### {finding.get('title', 'Untitled')}\n\n"
+                    f"{finding.get('detail', '')}\n\n"
+                    f"**Fix**: {finding.get('fix', 'N/A')}\n"
+                )
+    lines.append(f"## Verdict\n\n**{data['verdict']}**")
+    return "\n".join(lines)
+
+
 class OpenCodeRunner:
     """Runs opencode against a vLLM endpoint for a given prompt."""
 

@@ -16,23 +16,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 GitProvider = Literal["github", "gitlab"]
 
 DEFAULT_REVIEW_RULES = (
-    "Write the review as a single markdown comment. Start directly with the "
-    "first section heading — no preamble, no meta-commentary, no thinking, "
-    "no 'Let me check...' or 'Looking at this PR...'.\n\n"
-    "Only include sections that have real findings. If a section has nothing "
-    "to report, skip it entirely. Do not invent issues. Do not comment on "
-    "code that is already correct or handled properly — if you catch yourself "
-    "writing 'this is fine' or 'no issue', delete that finding.\n\n"
-    "## Critical issues\n\n\n"
-    "## Medium issues\n\n\n"
-    "## Low issues\n\n\n"
-    "## Verdict\n\n"
-    "End with a verdict. Pick exactly one:\n"
-    "- **Approve** — no issues found, safe to merge.\n"
-    "- **Request changes** — the issues above should be addressed before "
-    "merging.\n"
-    "The verdict must be consistent with the sections above. If there are "
-    "Critical issues, the verdict must be Request changes.\n\n"
+    "Analyze the PR silently. Do NOT output your reasoning, thinking, "
+    "or commentary — no 'Let me check...', no 'Actually...', no 'Looking "
+    "at this...'. Your entire response must be exactly ONE JSON code block "
+    "and nothing else.\n\n"
+    "```json\n"
+    "{\n"
+    '  "critical": [\n'
+    '    {"title": "brief summary", "detail": "concise explanation", '
+    '"fix": "concrete fix"}\n'
+    "  ],\n"
+    '  "medium": [...],\n'
+    '  "low": [...],\n'
+    '  "verdict": "Approve" | "Request changes"\n'
+    "}\n"
+    "```\n\n"
+    "Rules:\n"
+    "- Empty sections → empty arrays []. Omit sections with no findings.\n"
+    "- title: one-line summary of the issue.\n"
+    "- detail: concise explanation of the risk.\n"
+    "- fix: concrete, actionable fix.\n"
+    "- verdict: consistent with findings. Critical issues → "
+    "Request changes.\n\n"
     "Judge correctness, security, maintainability, policy compliance, and "
     "consistency. For each finding explain the risk concisely with a "
     "concrete fix.\n"
@@ -50,8 +55,7 @@ DEFAULT_REVIEW_RULES = (
     "Critical if it breaks a hard rule, Medium otherwise.\n"
     "- Consistency with existing patterns → Low.\n"
     "- Secrets audit: classify as [TRUE POSITIVE] or [FALSE POSITIVE].\n"
-    "- Stale references to deleted/renamed symbols → Medium.\n\n"
-    "Be concise — a one-line issue with a fix is better than a paragraph."
+    "- Stale references to deleted/renamed symbols → Medium."
 )
 
 
