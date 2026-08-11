@@ -5,6 +5,7 @@ H.E.R.M.I.T reads its configuration from environment variables prefixed with
 """
 
 import json
+import os
 import shlex
 from functools import lru_cache
 from typing import List, Literal
@@ -150,6 +151,43 @@ class Settings(_SettingsBase):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
+
+    @field_validator("github_token", "gitlab_token", "git_read_token", mode="after")
+    @classmethod
+    def _coerce_empty_secretstr(cls, value: SecretStr | None) -> SecretStr | None:
+        """Treat an empty SecretStr as None (secretKeyRef may inject an empty value)."""
+        if value is not None and not value.get_secret_value():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _collect_org_tokens(self) -> "Settings":
+        """Collect ``HERMIT_*_ORG_<N>_NAME/TOKEN`` env vars into token maps.
+
+        When the Helm chart injects per-org tokens via ``secretKeyRef`` they
+        land as numbered environment variables (the index is assigned by a
+        ``range`` loop in the deployment template).  This validator scans the
+        process environment, pairs each ``_NAME`` with its ``_TOKEN``, and
+        merges them into ``github_token_map`` / ``git_read_token_map``.
+        """
+        rw_orgs: dict[str, str] = {}
+        read_orgs: dict[str, str] = {}
+        for key, value in os.environ.items():
+            if key.startswith("HERMIT_GITHUB_RW_ORG_") and key.endswith("_NAME"):
+                idx = key[len("HERMIT_GITHUB_RW_ORG_") : -len("_NAME")]
+                token_key = f"HERMIT_GITHUB_RW_ORG_{idx}_TOKEN"
+                if token_key in os.environ:
+                    rw_orgs[value] = os.environ[token_key]
+            if key.startswith("HERMIT_GIT_READ_ORG_") and key.endswith("_NAME"):
+                idx = key[len("HERMIT_GIT_READ_ORG_") : -len("_NAME")]
+                token_key = f"HERMIT_GIT_READ_ORG_{idx}_TOKEN"
+                if token_key in os.environ:
+                    read_orgs[value] = os.environ[token_key]
+        if rw_orgs:
+            self.github_token_map = {**rw_orgs, **self.github_token_map}
+        if read_orgs:
+            self.git_read_token_map = {**read_orgs, **self.git_read_token_map}
+        return self
 
     @model_validator(mode="after")
     def _validate_tokens(self) -> "Settings":

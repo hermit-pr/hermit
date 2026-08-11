@@ -66,3 +66,43 @@ def test_supports_private_ca_bundle() -> None:
     assert "HERMIT_POD_CA_MOUNT_PATH" in configmap
     assert "ca-bundle" in deployment
     assert "SSL_CERT_FILE" in deployment
+
+
+def test_deployment_supports_per_org_rw_tokens() -> None:
+    """The deployment template generates HERMIT_GITHUB_RW_ORG_ env vars."""
+    deployment = _template("deployment.yaml")
+    assert "HERMIT_GITHUB_RW_ORG_" in deployment
+    assert "_NAME" in deployment
+    assert "_TOKEN" in deployment
+    assert "githubRwToken.orgs" in deployment
+
+
+def test_deployment_supports_per_org_read_tokens() -> None:
+    """The deployment template generates HERMIT_GIT_READ_ORG_ env vars."""
+    deployment = _template("deployment.yaml")
+    assert "HERMIT_GIT_READ_ORG_" in deployment
+
+
+def test_deployment_injects_fallback_tokens_via_secret_key_ref() -> None:
+    """Fallback tokens are injected via secretKeyRef."""
+    deployment = _template("deployment.yaml")
+    assert "HERMIT_GITHUB_TOKEN" in deployment
+    assert "HERMIT_GIT_READ_TOKEN" in deployment
+    assert "githubRwToken.token.secretName" in deployment
+    assert "githubReadToken.token.secretName" in deployment
+
+
+def test_values_has_no_inline_tokens() -> None:
+    """Token values.yaml refs Secret by name+key — never inline values."""
+    values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert "orgs:" in values
+    assert "  # - name:" in values  # commented example, not inline value
+    assert 'secretName: ""' in values
+    assert 'secretKey: ""' in values
+    assert "orgs: []" in values
+    assert "orgs: {}" not in values  # old inline map format is gone
+
+
+def test_secrets_tokens_file_is_absent() -> None:
+    """secrets-tokens.yaml was deleted — tokens are injected via secretKeyRef."""
+    assert not (HELM_DIR / "templates" / "secrets-tokens.yaml").exists()
