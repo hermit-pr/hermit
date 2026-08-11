@@ -60,11 +60,11 @@ def test_settings_splits_opencode_args() -> None:
 
 
 def test_settings_default_review_rules_define_sections() -> None:
-    """The hardcoded default rules ask for the fixed review sections."""
-    assert "Critical issues" in DEFAULT_REVIEW_RULES
-    assert "Medium issues" in DEFAULT_REVIEW_RULES
-    assert "Low issues" in DEFAULT_REVIEW_RULES
-    assert "Verdict" in DEFAULT_REVIEW_RULES
+    """The hardcoded default rules define the JSON verdict structure."""
+    assert '"critical"' in DEFAULT_REVIEW_RULES
+    assert '"medium"' in DEFAULT_REVIEW_RULES
+    assert '"low"' in DEFAULT_REVIEW_RULES
+    assert '"verdict"' in DEFAULT_REVIEW_RULES
 
 
 def test_settings_review_rules_defaults_to_empty() -> None:

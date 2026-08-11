@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Review output parsing is now JSON-based.** The default review rules prompt
+  instructs the model to output a single `` ```json ``` `` code block with
+  structured findings. A new ``extract_json_verdict()`` function parses this
+  JSON and reformats it into markdown, eliminating LLM reasoning leakage from
+  PR/MR comments. Falls back to heading-strip behaviour when no valid JSON is
+  found.
+- The fallback heading regex in the pre-0.3.1 parsing path now matches any
+  heading level (``^#+``) instead of only ``##`` headings, so single-``#``
+  verdict headings like ``# Critical issues`` are not silently dropped.
+
 ## [0.3.0] - 2026-08-11
 
 ### Changed
