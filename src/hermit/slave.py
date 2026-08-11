@@ -77,14 +77,20 @@ async def run_review(settings: SlaveSettings) -> str:
         os.remove(askpass_path)
     except OSError:
         pass
-    await asyncio.to_thread(
+    extracted = await asyncio.to_thread(
         extract_policy,
         repo_dir,
         settings.base_sha,
         policy_path,
         settings.policy_file_path,
     )
-    logger.info("extracting policy file %s", settings.policy_file_path)
+    if extracted:
+        logger.info("extracted policy file %s", settings.policy_file_path)
+    else:
+        logger.warning(
+            "policy file %s not found at base commit, skipping",
+            settings.policy_file_path,
+        )
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
@@ -93,7 +99,7 @@ async def run_review(settings: SlaveSettings) -> str:
         pr_body=settings.pr_body,
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
-        policy_extract_path=policy_path,
+        policy_extract_path=policy_path if extracted else "",
     )
     runner = OpenCodeRunner(
         settings.opencode_bin,
