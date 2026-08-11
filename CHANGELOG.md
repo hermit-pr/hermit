@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-08-11
+
+### Fixed
+
+- **Helm chart version and `pyproject.toml` version bumped to 0.3.2.**
+  `Chart.yaml` was stuck at 0.3.0; `pyproject.toml` was stuck at 0.2.9.
+
 ## [0.3.1] - 2026-08-11
 
 ### Changed
@@ -433,6 +440,9 @@ GitLab and GitHub.
 - All remaining pylint `broad-exception-caught` replaced with specific exceptions.
 - `k8s.py`, `jobs.py`, `slave.py` have zero pylint disables; `server.py` has only 2 justified background-loop exceptions.
 
+[0.3.2]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.3.1...v0.3.2
+[0.3.1]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.3.0...v0.3.1
+[0.3.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.9...v0.3.0
 [0.2.9]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.8...v0.2.9
 [0.2.8]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.7...v0.2.8
 [0.2.7]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.6...v0.2.7
