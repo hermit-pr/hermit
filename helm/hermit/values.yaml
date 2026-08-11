@@ -101,14 +101,30 @@ networkPolicy:
 # only ``token``. For multi-org deployments with Fine-Grained PATs, map each
 # org to its PAT in ``orgs``; ``token`` acts as fallback for unmapped orgs.
 # Either ``token`` or at least one ``orgs`` entry is required.
+#
+# Tokens MUST reference existing Kubernetes Secrets via ``secretName`` and
+# ``secretKey`` — NEVER put token values inline. The chart injects them into
+# the master pod via ``secretKeyRef``.
 githubRwToken:
-  token: ""
-  orgs: {}
+  token:
+    secretName: ""
+    secretKey: ""
+  orgs: []
+  # - name: myorg
+  #   secretName: myorg-rw-secret
+  #   secretKey: token
 gitlabRwToken:
-  token: ""
-gitReadToken:
-  token: ""
-  orgs: {}
+  token:
+    secretName: ""
+    secretKey: ""
+githubReadToken:
+  token:
+    secretName: ""
+    secretKey: ""
+  orgs: []
+  # - name: myorg
+  #   secretName: myorg-read-secret
+  #   secretKey: token
 
 # Other secrets reference existing Kubernetes Secrets in the same namespace.
 secrets:

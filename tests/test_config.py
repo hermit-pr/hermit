@@ -1,10 +1,12 @@
 """Tests for the application settings."""
 
+import os
+
 import pytest
 from conftest import make_settings
 from pydantic import ValidationError
 
-from hermit.config import DEFAULT_REVIEW_RULES, SlaveSettings
+from hermit.config import DEFAULT_REVIEW_RULES, Settings, SlaveSettings
 
 
 def test_settings_accepts_minimal_keyword_arguments() -> None:
@@ -113,3 +115,122 @@ def test_token_map_rejects_malformed_json() -> None:
         make_settings(
             github_token_map='{"acme": "token"',  # missing closing brace
         )
+
+
+def test_collect_org_tokens_from_env() -> None:
+    """Per-org env vars are collected into token maps."""
+    monkeypatch_env = {
+        "HERMIT_GITHUB_RW_ORG_0_NAME": "acme",
+        "HERMIT_GITHUB_RW_ORG_0_TOKEN": "ghp_rw_token",
+        "HERMIT_GITHUB_RW_ORG_1_NAME": "other",
+        "HERMIT_GITHUB_RW_ORG_1_TOKEN": "ghp_rw_other",
+        "HERMIT_GIT_READ_ORG_0_NAME": "acme",
+        "HERMIT_GIT_READ_ORG_0_TOKEN": "ghp_read_token",
+    }
+    saved = {k: os.environ.get(k) for k in monkeypatch_env}
+    os.environ.update(monkeypatch_env)
+    try:
+        settings = make_settings(github_token=None, git_read_token=None)
+    finally:
+        for k in monkeypatch_env:
+            if saved[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = saved[k]
+    assert settings.github_token_map == {
+        "acme": "ghp_rw_token",
+        "other": "ghp_rw_other",
+    }
+    assert settings.git_read_token_map == {"acme": "ghp_read_token"}
+
+
+def test_collect_org_tokens_merges_with_existing_map() -> None:
+    """Env var tokens merge with any existing token_map value."""
+    monkeypatch_env = {
+        "HERMIT_GITHUB_RW_ORG_0_NAME": "acme",
+        "HERMIT_GITHUB_RW_ORG_0_TOKEN": "ghp_env_token",
+    }
+    saved = {k: os.environ.get(k) for k in monkeypatch_env}
+    os.environ.update(monkeypatch_env)
+    try:
+        settings = make_settings(
+            github_token=None,
+            github_token_map={"other": "ghp_other"},
+            git_read_token=None,
+            git_read_token_map={"acme": "ghp_read"},
+        )
+    finally:
+        for k in monkeypatch_env:
+            if saved[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = saved[k]
+    assert settings.github_token_map == {"acme": "ghp_env_token", "other": "ghp_other"}
+
+
+def test_empty_secretstr_coerced_to_none() -> None:
+    """An empty SecretStr token is treated as None (absent secretKeyRef)."""
+    settings = Settings(
+        webhook_secret="0123456789abcdef",
+        git_read_token=None,
+        git_read_token_map={"acme": "ghp_read"},
+        github_token="",  # empty string should be coerced to None
+        github_token_map={"acme": "ghp_test"},
+        vllm_endpoint="http://vllm.example:8000/v1",
+        model="test-model",
+        master_url="http://hermit:8080",
+        pod_image="hermit:test",
+    )
+    assert settings.github_token is None
+
+
+def test_collect_org_tokens_ignores_unmatched_env() -> None:
+    """Env vars without matching _TOKEN pair are not collected."""
+    monkeypatch_env = {
+        "HERMIT_GITHUB_RW_ORG_0_NAME": "lonely",
+    }
+    saved = {k: os.environ.get(k) for k in monkeypatch_env}
+    os.environ.update(monkeypatch_env)
+    try:
+        settings = make_settings(
+            github_token=None,
+            git_read_token=None,
+            github_token_map={"acme": "ghp_rw"},
+            git_read_token_map={"acme": "ghp_read"},
+        )
+    finally:
+        for k in monkeypatch_env:
+            if saved[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = saved[k]
+    assert settings.github_token_map == {"acme": "ghp_rw"}
+    assert settings.git_read_token_map == {"acme": "ghp_read"}
+
+
+def test_github_provider_validates_after_org_token_collection() -> None:
+    """Validation passes when only per-org env vars supply GitHub tokens."""
+    monkeypatch_env = {
+        "HERMIT_GITHUB_RW_ORG_0_NAME": "acme",
+        "HERMIT_GITHUB_RW_ORG_0_TOKEN": "ghp_rw_token",
+        "HERMIT_GIT_READ_ORG_0_NAME": "acme",
+        "HERMIT_GIT_READ_ORG_0_TOKEN": "ghp_read_token",
+    }
+    saved = {k: os.environ.get(k) for k in monkeypatch_env}
+    os.environ.update(monkeypatch_env)
+    try:
+        settings = make_settings(
+            git_provider="github",
+            github_token=None,
+            git_read_token=None,
+        )
+    finally:
+        for k in monkeypatch_env:
+            if saved[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = saved[k]
+    assert settings.github_token is None
+    assert settings.git_read_token is None
+    assert settings.github_token_map == {"acme": "ghp_rw_token"}
+    assert settings.git_read_token_map == {"acme": "ghp_read_token"}

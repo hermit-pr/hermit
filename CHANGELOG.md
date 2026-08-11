@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-11
+
+### Changed
+
+- **Breaking**: GitHub token configuration no longer accepts inline PAT values.
+  ``githubRwToken`` and ``githubReadToken`` now reference existing Kubernetes
+  Secrets via ``secretName`` / ``secretKey``; ``orgs`` changed from a dict of
+  ``org -> token`` to a list of ``{name, secretName, secretKey}`` entries that
+  the deployment injects via ``secretKeyRef``.  ``gitlabRwToken`` uses the
+  same reference pattern.  Per-org tokens are collected from numbered
+  ``HERMIT_GITHUB_RW_ORG_<N>_NAME/TOKEN`` and ``HERMIT_GIT_READ_ORG_<N>_NAME/
+  TOKEN`` environment variables (set by the Helm deployment template) and
+  merged into the JSON token maps at startup.
+- Empty ``SecretStr`` token values (e.g. from a missing or empty
+  ``secretKeyRef``) are coerced to ``None`` so the fallback logic in
+  ``_resolve_rw_token`` and ``_build_secret`` works correctly.
+
+### Removed
+
+- ``secrets-tokens.yaml`` Helm template deleted.  The chart no longer creates a
+  Secret containing inline token values; everything is injected via
+  ``secretKeyRef`` in the deployment.
+
+### Security
+
+- Tokens are never stored in ``values.yaml``.  All sensitive values reference
+  existing Kubernetes Secrets.  The rule is documented in ``AGENTS.md``:
+  inline token values in chart values are forbidden by design.
+
+[0.3.0]: https://gitlab.com/hermit-bot/hermit/-/compare/v0.2.9...v0.3.0
 ## [0.2.9] - 2026-08-09
 
 ### Added

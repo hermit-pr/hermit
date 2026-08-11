@@ -39,9 +39,46 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "hermit.fullname" . }}
-            - secretRef:
-                name: {{ include "hermit.fullname" . }}-tokens
           env:
+            {{- if .Values.githubRwToken.token.secretName }}
+            - name: HERMIT_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.githubRwToken.token.secretName | quote }}
+                  key: {{ .Values.githubRwToken.token.secretKey | quote }}
+            {{- end }}
+            {{- if .Values.gitlabRwToken.token.secretName }}
+            - name: HERMIT_GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gitlabRwToken.token.secretName | quote }}
+                  key: {{ .Values.gitlabRwToken.token.secretKey | quote }}
+            {{- end }}
+            {{- if .Values.githubReadToken.token.secretName }}
+            - name: HERMIT_GIT_READ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.githubReadToken.token.secretName | quote }}
+                  key: {{ .Values.githubReadToken.token.secretKey | quote }}
+            {{- end }}
+            {{- range $i, $org := .Values.githubRwToken.orgs }}
+            - name: HERMIT_GITHUB_RW_ORG_{{ $i }}_NAME
+              value: {{ $org.name | quote }}
+            - name: HERMIT_GITHUB_RW_ORG_{{ $i }}_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $org.secretName | quote }}
+                  key: {{ $org.secretKey | quote }}
+            {{- end }}
+            {{- range $i, $org := .Values.githubReadToken.orgs }}
+            - name: HERMIT_GIT_READ_ORG_{{ $i }}_NAME
+              value: {{ $org.name | quote }}
+            - name: HERMIT_GIT_READ_ORG_{{ $i }}_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $org.secretName | quote }}
+                  key: {{ $org.secretKey | quote }}
+            {{- end }}
             {{- if .Values.secrets.webhookSecret.name }}
             - name: HERMIT_WEBHOOK_SECRET
               valueFrom:

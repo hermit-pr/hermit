@@ -67,6 +67,7 @@ This replicates the `build` job in `.github/workflows/docker-build.yml`. The ima
 ## CI constraints
 
 - GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus a single `check` job (lint, test, shellcheck, shfmt, helm lint). Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
+- **NEVER put secrets, tokens, or any sensitive values in `values.yaml`.** The chart must always reference existing Kubernetes Secrets via ``secretName``/``secretKey`` and renders ``secretKeyRef`` entries. Inline token values are forbidden by design.
 - Docker build and Helm package are handled on the GitHub mirror (`.github/workflows/docker-build.yml`), not on GitLab.
 - GitHub mirror: pushes to `ghcr.io/hermit-pr/hermit` on main commits and semver tags; Helm chart pushed to OCI on tags only.
 
