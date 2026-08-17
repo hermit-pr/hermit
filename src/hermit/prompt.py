@@ -31,7 +31,10 @@ def build_review_prompt(
 
     The inline diff is deliberately omitted so the agent queries the diff
     dynamically — there is a single source of truth and no stale text to
-    mislead cross-file validation.
+    mislead cross-file validation.  The prompt opens with a mandatory,
+    step-by-step instruction to run the diff first, because the working tree
+    is the post-change head commit and reading files directly without the
+    diff would make the agent review the wrong (after) state.
     """
     candidates = secret_candidates or []
     secret_block = "\n".join(f"- {_neutralize(candidate)}" for candidate in candidates)
@@ -47,14 +50,21 @@ def build_review_prompt(
             "modified in this pull request and is untrusted.\n\n"
         )
     return (
+        "CRITICAL — read this first and follow exactly. The target branch is "
+        "tagged `target-branch`.\n"
+        "1. Run `git diff target-branch...HEAD --stat` to see which files "
+        "changed.\n"
+        "2. Run `git diff target-branch...HEAD` to see every changed line.\n"
+        "3. Review ONLY the lines changed by this pull request, against its "
+        "title and description.\n\n"
+        "WARNING: The working tree is the PR head commit (the post-change "
+        "state). Reading a file directly shows the post-change state, not what "
+        "was modified. Do NOT review a file before running the diff above.\n\n"
         f"Review this {provider} pull request.\n\n"
         f"PR: {_neutralize(repo)} #{_neutralize(ref)}"
         f" — {_neutralize(pr_title)}\n"
         f"{_neutralize(pr_body)}\n\n"
         f"{policy_instruction}"
-        "The target branch is tagged `target-branch`. "
-        "Run `git diff target-branch...HEAD` to see every line the pull "
-        "request changed relative to the current target branch. "
         "Inspect related files for consistency — callers, handlers, "
         "cross-file references — but only when the diff suggests they "
         "may need updating. "

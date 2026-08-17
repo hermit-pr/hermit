@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `extract_json_verdict()` could parse it, leaking raw LLM commentary into
   PR/MR comments. All messages are now concatenated in insertion order
   ([#6](https://gitlab.com/hermit-bot/hermit/-/work_items/6)).
+- **The review prompt now mandates running the diff first.** The instruction to
+  run `git diff target-branch...HEAD` was buried in a paragraph, so the model
+  sometimes read working-tree files directly — which hold the post-change head
+  state — and produced inverted findings. The prompt now opens with an explicit
+  step-by-step diff instruction and a warning that the working tree is the
+  post-change state
+  ([#7](https://gitlab.com/hermit-bot/hermit/-/work_items/7)).
 
 ## [0.3.2] - 2026-08-11
 

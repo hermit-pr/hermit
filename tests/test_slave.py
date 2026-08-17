@@ -53,6 +53,19 @@ def test_build_review_prompt_includes_rules_and_instructions() -> None:
     assert "git show target-branch:" in prompt
 
 
+def test_build_review_prompt_prioritizes_diff_instruction() -> None:
+    """The diff is a mandatory first step before any other instruction."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        pr_title="Add endpoint",
+    )
+    assert prompt.startswith("CRITICAL")
+    assert "git diff target-branch...HEAD --stat" in prompt
+    assert "post-change state" in prompt
+
+
 def test_build_review_prompt_neutralizes_pr_content() -> None:
     """PR title and body cannot smuggle prompt markup into the prompt."""
     prompt = build_review_prompt(
