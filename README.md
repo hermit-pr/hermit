@@ -150,13 +150,13 @@ need to build it locally:
 - tagged releases (`vX.Y.Z`) are also pushed as `ghcr.io/hermit-pr/hermit:X.Y.Z`
   (the leading `v` is stripped).
 
-The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.3.2`),
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.3.3`),
 so the versioned image is used automatically.
 
 For example:
 
 ```sh
-docker pull ghcr.io/hermit-pr/hermit:0.3.2
+docker pull ghcr.io/hermit-pr/hermit:0.3.3
 ```
 
 Set `image.repository` and `image.tag` in the Helm values to your registry
@@ -203,7 +203,7 @@ to pick a specific release):
 ```sh
 helm registry login ghcr.io -u <username> -p <password>   # only if the registry is private
 helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --set image.repository=ghcr.io/hermit-pr/hermit \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com/api/v4 \
@@ -226,7 +226,7 @@ For GitHub with multi-org Fine-Grained PATs:
 
 ```sh
 helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --set image.repository=ghcr.io/hermit-pr/hermit \
   --set config.gitProvider=github \
   --set config.gitHostUrl=https://ghe.corp/api/v3 \
@@ -299,7 +299,7 @@ takes precedence when both `configMap` and `secret` are set.
 kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
 
 helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --set ... \
   --set caBundle.configMap=ca-bundle-cm \
   --set caBundle.configMapKey=ca.pem
@@ -312,7 +312,7 @@ Point GitLab/GitHub webhooks at the master Service (`http://<release-name>-hermi
 ### 5. Verify
 
 - `kubectl get pods` — the master should be `Running`.
-- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.3.2"}`.
+- `curl http://<service>/healthz` returns `{"status": "ok", "version": "0.3.3"}`.
 - Open a PR/MR or write `@hermit` in a comment: a reviewer pod is spawned and a review is posted.
 
 ## Running locally
@@ -346,7 +346,7 @@ HERMIT_POD_SPAWNER=fake \
 
 ## Status
 
-**v0.3.2 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
+**v0.3.3 is released.** The master, reviewer pods, providers, opencode integration, Helm chart, and all deployment assets are implemented and audited for production readiness.
 
 ## License
 
