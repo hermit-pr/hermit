@@ -50,11 +50,13 @@ BASH_PERMISSIONS: dict[str, str] = {
 
 
 def extract_text(stdout: str) -> str:
-    """Extract the final text block from opencode NDJSON output.
+    """Extract all text blocks from opencode NDJSON output.
 
     Text fragments arrive as events with ``{"part": {"type": "text",
     "text": ...}}`` and are accumulated per message id. The concatenated text
-    of the last message is returned. An ``error`` event raises ``RuntimeError``.
+    of every message, in insertion order, is returned. This preserves JSON
+    verdicts emitted in an earlier message even when later messages add
+    commentary. An ``error`` event raises ``RuntimeError``.
 
     Raises:
         RuntimeError: if opencode emitted an error event or no text at all.
@@ -82,7 +84,7 @@ def extract_text(stdout: str) -> str:
         messages.setdefault(str(message_id), []).append(text)
     if not messages:
         raise RuntimeError("opencode produced no text output")
-    result = "".join(messages[list(messages)[-1]]).strip()
+    result = "".join("".join(texts) for texts in messages.values()).strip()
     result = re.sub(r"<thinking>.*?</thinking>", "", result, flags=re.DOTALL).strip()
     return result
 

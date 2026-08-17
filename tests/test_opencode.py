@@ -144,7 +144,7 @@ def test_opencode_config_disables_sharing() -> None:
 
 
 def test_extract_text_accumulates_fragments_by_message() -> None:
-    """NDJSON text fragments of the last message are concatenated."""
+    """NDJSON text fragments of every message are concatenated in order."""
     stdout = "\n".join(
         [
             json.dumps({"type": "message", "messageID": "m1"}),
@@ -157,7 +157,36 @@ def test_extract_text_accumulates_fragments_by_message() -> None:
             ),
         ]
     )
-    assert extract_text(stdout) == "Final review"
+    assert extract_text(stdout) == "Hello worldFinal review"
+
+
+def test_extract_text_keeps_verdict_from_earlier_message() -> None:
+    """A JSON verdict in an earlier message survives later commentary."""
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "messageID": "m1",
+                    "part": {
+                        "type": "text",
+                        "text": '```json\n{"verdict": "Approve"}\n```',
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "messageID": "m2",
+                    "part": {
+                        "type": "text",
+                        "text": "I'm ready to produce the final JSON review.",
+                    },
+                }
+            ),
+        ]
+    )
+    markdown = extract_json_verdict(extract_text(stdout))
+    assert markdown is not None
+    assert "**Approve**" in markdown
 
 
 def test_extract_text_raises_on_error_event() -> None:

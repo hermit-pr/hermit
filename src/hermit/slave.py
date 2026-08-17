@@ -28,20 +28,18 @@ from hermit.secretscan import scan_for_secrets
 logger = logging.getLogger(__name__)
 
 
-async def run_review(settings: SlaveSettings) -> str:
-    """Perform one full review and return the review text."""
-    workspace = os.path.abspath(settings.workspace)
-    os.makedirs(workspace, exist_ok=True)
+async def _prepare_repository(
+    settings: SlaveSettings, workspace: str
+) -> tuple[str, str, bool]:
+    """Clone the repository, compute the diff and extract the policy file.
+
+    Returns a ``(diff, policy_path, extracted)`` tuple where ``extracted`` is
+    ``True`` when the policy file was found at the base commit.
+
+    Raises:
+        ValueError: if the computed diff is empty.
+    """
     repo_dir = os.path.join(workspace, "repo")
-    logger.info(
-        "starting review job %s for %s %s (%s) base=%s ref=%s",
-        settings.job_id,
-        settings.git_provider,
-        settings.repo,
-        settings.model,
-        settings.base_ref,
-        settings.head_ref,
-    )
     askpass_path = os.path.join(workspace, ".git-askpass")
     write_askpass(askpass_path)
     env = askpass_env(askpass_path)
@@ -91,6 +89,23 @@ async def run_review(settings: SlaveSettings) -> str:
             "policy file %s not found at base commit, skipping",
             settings.policy_file_path,
         )
+    return diff, policy_path, extracted
+
+
+async def run_review(settings: SlaveSettings) -> str:
+    """Perform one full review and return the review text."""
+    workspace = os.path.abspath(settings.workspace)
+    os.makedirs(workspace, exist_ok=True)
+    logger.info(
+        "starting review job %s for %s %s (%s) base=%s ref=%s",
+        settings.job_id,
+        settings.git_provider,
+        settings.repo,
+        settings.model,
+        settings.base_ref,
+        settings.head_ref,
+    )
+    diff, policy_path, extracted = await _prepare_repository(settings, workspace)
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
