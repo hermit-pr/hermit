@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  # Built and pushed by the docker-build CI job.
-  repository: registry.gitlab.com/hermit-bot/hermit
+  # Built and pushed to ghcr.io/hermit-pr/hermit by GitHub Actions on the mirror.
+  repository: ghcr.io/hermit-pr/hermit
   # Defaults to Chart.appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step-by-step diff instruction and a warning that the working tree is the
   post-change state
   ([#7](https://gitlab.com/hermit-bot/hermit/-/work_items/7)).
+- **README and chart defaults no longer claim a GitLab CI that does not exist.**
+  The docs and `values.yaml` referenced `docker-build` / `helm-package` GitLab
+  pipeline jobs and the GitLab Container Registry, but Docker images and Helm
+  charts are actually built and published to `ghcr.io/hermit-pr/hermit` by
+  GitHub Actions on the mirror. All registry references now point at GHCR.
 
 ## [0.3.2] - 2026-08-11
 

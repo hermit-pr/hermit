@@ -142,21 +142,25 @@ The master fills these from the originating change event; the pod only reads the
 
 ### 1. Pull the CI-built image
 
-The `docker-build` pipeline job builds the image and pushes it to your GitLab Container Registry once `$CI_REGISTRY_IMAGE` is set, so there is no need to build it locally:
+The Docker image is built and pushed to the GitHub Container Registry
+(`ghcr.io/hermit-pr/hermit`) by GitHub Actions on the mirror, so there is no
+need to build it locally:
 
-- every commit is pushed as `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`;
-- tagged releases (`vX.Y.Z`) are also pushed as `$CI_REGISTRY_IMAGE:X.Y.Z` (the leading `v` is stripped).
+- every commit to `main` is pushed as `ghcr.io/hermit-pr/hermit:main`;
+- tagged releases (`vX.Y.Z`) are also pushed as `ghcr.io/hermit-pr/hermit:X.Y.Z`
+  (the leading `v` is stripped).
 
-The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.3.2`), so the versioned image is used automatically.
+The Helm chart defaults to `image.tag` = `Chart.appVersion` (currently `0.3.2`),
+so the versioned image is used automatically.
 
 For example:
 
 ```sh
-docker pull registry.gitlab.com/hermit-bot/hermit:0.3.2
 docker pull ghcr.io/hermit-pr/hermit:0.3.2
 ```
 
-Set `image.repository` and `image.tag` in the Helm values to the registry image and tag accordingly (`registry.gitlab.com/hermit-bot/hermit` on GitLab, `ghcr.io/hermit-pr/hermit` on GitHub).
+Set `image.repository` and `image.tag` in the Helm values to your registry
+mirror and tag accordingly (default `ghcr.io/hermit-pr/hermit`).
 
 The image does not bundle the opencode binary by default; reviewer pods get it from the init container.
 
@@ -191,14 +195,16 @@ kubectl create secret generic myorg-read --from-literal=token=github_pat_yyy...
 
 ### 3. Install the chart
 
-The `helm-package` pipeline job packages the chart and pushes it to
-`oci://$CI_REGISTRY_IMAGE/charts` (here `oci://registry.gitlab.com/hermit-bot/hermit/charts`). The chart and container image are also published to `oci://ghcr.io/hermit-pr/hermit/charts` and `ghcr.io/hermit-pr/hermit` via GitHub Actions on tagged releases. Authenticate to the registry if it is private, then install from the OCI reference (supply the chart `version` to pick a specific release):
+The Helm chart is packaged and pushed to `oci://ghcr.io/hermit-pr/hermit/charts`
+by GitHub Actions on the mirror on tagged releases. Authenticate to the registry
+if it is private, then install from the OCI reference (supply the chart `version`
+to pick a specific release):
 
 ```sh
-helm registry login registry.gitlab.com -u <username> -p <password>   # only if the registry is private
-helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+helm registry login ghcr.io -u <username> -p <password>   # only if the registry is private
+helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
   --version 0.3.2 \
-  --set image.repository=registry.gitlab.com/hermit-bot/hermit \
+  --set image.repository=ghcr.io/hermit-pr/hermit \
   --set config.gitProvider=gitlab \
   --set config.gitHostUrl=https://gitlab.example.com/api/v4 \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
@@ -219,9 +225,9 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
 For GitHub with multi-org Fine-Grained PATs:
 
 ```sh
-helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
   --version 0.3.2 \
-  --set image.repository=registry.gitlab.com/hermit-bot/hermit \
+  --set image.repository=ghcr.io/hermit-pr/hermit \
   --set config.gitProvider=github \
   --set config.gitHostUrl=https://ghe.corp/api/v3 \
   --set config.vllmEndpoint=http://vllm.example.com:8000/v1 \
@@ -246,7 +252,7 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
 To use the init container for providing the opencode binary (recommended for airgapped environments), the defaults work out of the box. To use a private registry mirror, override:
 
 ```sh
-helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
   ... \
   --set config.opencodeInitImage=registry.example.com/opencode:latest \
   --set config.opencodeInitBinPath=/usr/local/bin/opencode
@@ -255,7 +261,7 @@ helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
 To disable the init container and bundle opencode in the reviewer pod image instead:
 
 ```sh
-helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
   ... \
   --set config.opencodeInitImage=""
 ```
@@ -292,7 +298,7 @@ takes precedence when both `configMap` and `secret` are set.
 ```sh
 kubectl create configmap ca-bundle-cm --from-file=ca.pem=./private-root-ca.pem
 
-helm install hermit oci://registry.gitlab.com/hermit-bot/hermit/charts/hermit \
+helm install hermit oci://ghcr.io/hermit-pr/hermit/charts/hermit \
   --version 0.3.2 \
   --set ... \
   --set caBundle.configMap=ca-bundle-cm \
