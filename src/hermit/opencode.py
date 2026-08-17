@@ -135,6 +135,7 @@ class OpenCodeRunner:
         extra_env: Optional[dict[str, str]] = None,
         review_rules: str = "",
         timeout: int = 900,
+        cwd: Optional[str] = None,
     ) -> None:
         self._bin = bin_path
         self._endpoint = endpoint
@@ -144,6 +145,7 @@ class OpenCodeRunner:
         self._extra_env = extra_env or {}
         self._review_rules = review_rules
         self._timeout = timeout
+        self._cwd = cwd
 
     def _write_config(self) -> None:
         """Write an opencode.json wiring the vLLM endpoint into the workspace.
@@ -284,7 +286,7 @@ class OpenCodeRunner:
         )
         process = await asyncio.create_subprocess_exec(
             *command,
-            cwd=self._workspace,
+            cwd=self._cwd or self._workspace,
             env=self._environment(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

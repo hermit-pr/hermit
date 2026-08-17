@@ -1,6 +1,7 @@
 """Tests for the opencode integration."""
 
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -141,6 +142,39 @@ def test_opencode_config_disables_sharing() -> None:
     """The generated config explicitly disables session sharing."""
     config = _run({})
     assert config["share"] == "disabled"
+
+
+def _write_fake_opencode(path: str) -> None:
+    """Write an executable stub that prints its working directory as NDJSON."""
+    script = (
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import os\n"
+        "print(json.dumps({'part': {'type': 'text', 'text': os.getcwd()}}))\n"
+    )
+    Path(path).write_text(script, encoding="utf-8")
+    os.chmod(path, 0o755)
+
+
+async def test_opencode_run_spawns_in_repo_dir() -> None:
+    """opencode is spawned with cwd pinned to the repository directory."""
+    with (
+        tempfile.TemporaryDirectory() as workspace,
+        tempfile.TemporaryDirectory() as repo,
+    ):
+        bin_path = os.path.join(workspace, "fake-opencode")
+        _write_fake_opencode(bin_path)
+        runner = OpenCodeRunner(
+            bin_path=bin_path,
+            endpoint="http://vllm.example:8000/v1",
+            model="llama-3.1-8b-instruct",
+            workspace=workspace,
+            cwd=repo,
+        )
+        output = await runner.run("review this")
+        assert output == os.path.abspath(repo)
+        assert Path(workspace, "opencode.json").exists()
+        assert Path(workspace, "review-prompt.md").exists()
 
 
 def test_extract_text_accumulates_fragments_by_message() -> None:

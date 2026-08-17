@@ -30,11 +30,13 @@ logger = logging.getLogger(__name__)
 
 async def _prepare_repository(
     settings: SlaveSettings, workspace: str
-) -> tuple[str, str, bool]:
+) -> tuple[str, str, bool, str]:
     """Clone the repository, compute the diff and extract the policy file.
 
-    Returns a ``(diff, policy_path, extracted)`` tuple where ``extracted`` is
-    ``True`` when the policy file was found at the base commit.
+    Returns a ``(diff, policy_path, extracted, repo_dir)`` tuple where
+    ``extracted`` is ``True`` when the policy file was found at the base
+    commit and ``repo_dir`` is the directory the repository was cloned into
+    (used as the working directory for opencode).
 
     Raises:
         ValueError: if the computed diff is empty.
@@ -68,7 +70,7 @@ async def _prepare_repository(
     if not diff.strip():
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
-    policy_path = os.path.join(workspace, "policy.md")
+    policy_path = os.path.join(repo_dir, ".hermit-policy.md")
     if settings.base_sha:
         await asyncio.to_thread(ensure_commit, repo_dir, settings.base_sha, env=env)
     try:
@@ -89,7 +91,7 @@ async def _prepare_repository(
             "policy file %s not found at base commit, skipping",
             settings.policy_file_path,
         )
-    return diff, policy_path, extracted
+    return diff, policy_path, extracted, repo_dir
 
 
 async def run_review(settings: SlaveSettings) -> str:
@@ -105,7 +107,9 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.base_ref,
         settings.head_ref,
     )
-    diff, policy_path, extracted = await _prepare_repository(settings, workspace)
+    diff, policy_path, extracted, repo_dir = await _prepare_repository(
+        settings, workspace
+    )
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
@@ -127,6 +131,7 @@ async def run_review(settings: SlaveSettings) -> str:
         extra_env={"PROJECT_POLICY_FILE": policy_path},
         review_rules=settings.review_rules,
         timeout=settings.opencode_timeout_seconds,
+        cwd=repo_dir,
     )
     logger.info(
         "invoking opencode against vLLM endpoint (model=%s)",

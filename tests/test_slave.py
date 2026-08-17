@@ -141,9 +141,14 @@ async def test_review_includes_header(
 
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
     monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: False)
-    monkeypatch.setattr(
-        "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("the review body")
-    )
+    runner_kwargs: dict = {}
+
+    def fake_runner(*_args, **kwargs) -> _FakeRunner:
+        """Capture the OpenCodeRunner kwargs for assertion."""
+        runner_kwargs.update(kwargs)
+        return _FakeRunner("the review body")
+
+    monkeypatch.setattr("hermit.slave.OpenCodeRunner", fake_runner)
     monkeypatch.setattr("hermit.slave.report_review", fake_report)
     settings = SlaveSettings(
         job_id="job1",
@@ -161,6 +166,7 @@ async def test_review_includes_header(
     assert "test-model" in body
     assert "the review body" in body
     assert reported["body"] == body
+    assert runner_kwargs["cwd"] == str(tmp_path / "repo")
 
 
 @pytest.mark.skipif(

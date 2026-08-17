@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **opencode now runs inside the cloned repository directory.** The reviewer
+  spawned the opencode binary with the workspace root (`/workspace`) as its
+  working directory, while the repository is cloned into `/workspace/repo`, so
+  read-only bash commands (`git diff`, `cat`, `ls`, …) intermittently ran in
+  the wrong place. `OpenCodeRunner` now accepts an explicit `cwd` and the slave
+  passes `workspace/repo`, guaranteeing opencode operates on the clone without
+  relying on the model to `cd` into it.
+- **The extracted policy file is placed inside the repository directory.** The
+  base-commit `AGENTS.md` was extracted to `/workspace/policy.md` (the parent of
+  the clone), which opencode could no longer reach once its working directory
+  was pinned to `workspace/repo`. It is now written to
+  `workspace/repo/.hermit-policy.md`, so the agent reads it without navigating
+  up a directory.
+
 ## [0.3.3] - 2026-08-17
 
 ### Fixed
