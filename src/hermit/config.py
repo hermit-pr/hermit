@@ -120,7 +120,7 @@ class Settings(_SettingsBase):
     opencode_args: List[str] = Field(
         default_factory=lambda: ["run", "--auto", "--format", "json"]
     )
-    opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
+    opencode_init_image: str = "ghcr.io/anomalyco/opencode:2.1.4"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_init_image_pull_policy: str = "IfNotPresent"
     opencode_init_resources: dict = Field(
@@ -130,6 +130,8 @@ class Settings(_SettingsBase):
         }
     )
     opencode_timeout_seconds: int = 900
+    max_prompt_diff_bytes: int = 65536
+    review_max_steps: int = 12
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -263,9 +265,11 @@ class SlaveSettings(_SettingsBase):
     opencode_args: List[str] = Field(
         default_factory=lambda: ["run", "--auto", "--format", "json"]
     )
-    opencode_init_image: str = "ghcr.io/anomalyco/opencode:latest"
+    opencode_init_image: str = "ghcr.io/anomalyco/opencode:2.1.4"
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_timeout_seconds: int = 900
+    max_prompt_diff_bytes: int = 65536
+    review_max_steps: int = 12
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

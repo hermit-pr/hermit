@@ -67,6 +67,14 @@ def test_pod_environment_includes_version() -> None:
     assert env["HERMIT_VERSION"] == __version__
 
 
+def test_pod_environment_forwards_prompt_and_step_budgets() -> None:
+    """The reviewer pod receives the diff cap and the step budget."""
+    settings = make_settings(max_prompt_diff_bytes=2048, review_max_steps=9)
+    env = pod_environment(settings, make_job())
+    assert env["HERMIT_MAX_PROMPT_DIFF_BYTES"] == "2048"
+    assert env["HERMIT_REVIEW_MAX_STEPS"] == "9"
+
+
 def test_pod_environment_with_init_image() -> None:
     """pod_environment uses mounted path when init image is set."""
     settings = make_settings(opencode_init_image="ghcr.io/anomalyco/opencode:latest")

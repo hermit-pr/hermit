@@ -106,3 +106,19 @@ def test_values_has_no_inline_tokens() -> None:
 def test_secrets_tokens_file_is_absent() -> None:
     """secrets-tokens.yaml was deleted — tokens are injected via secretKeyRef."""
     assert not (HELM_DIR / "templates" / "secrets-tokens.yaml").exists()
+
+
+def test_configmap_exports_prompt_and_step_budgets() -> None:
+    """The chart forwards the diff cap and the review step budget."""
+    configmap = _template("configmap.yaml")
+    values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert "HERMIT_MAX_PROMPT_DIFF_BYTES" in configmap
+    assert "HERMIT_REVIEW_MAX_STEPS" in configmap
+    assert "maxPromptDiffBytes: 65536" in values
+    assert "reviewMaxSteps: 12" in values
+
+
+def test_chart_pins_an_opencode_2_release() -> None:
+    """The default init image must provide the schema hermit generates."""
+    values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert "ghcr.io/anomalyco/opencode:2." in values

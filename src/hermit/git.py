@@ -119,6 +119,16 @@ def diff_between(repo_dir: str, base: str, head: str) -> str:
     return _run(["git", "-C", repo_dir, "diff", "--no-color", f"{base}..{head}"])
 
 
+def diff_stat(repo_dir: str) -> str:
+    """Return the ``--stat`` summary of the pull-request diff.
+
+    Computed on the same checkout and target tag as :func:`clone_and_diff`, so
+    the file list shown to the reviewer can never disagree with the injected
+    diff.
+    """
+    return _run(["git", "-C", repo_dir, "diff", "--no-color", "--stat", TARGET_TAG])
+
+
 def clone_and_diff(
     provider: str,
     source_url: str,

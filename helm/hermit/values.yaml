@@ -41,7 +41,8 @@ config:
     - "@hermit"
     - "/recheck"
   opencodeBin: opencode
-  opencodeInitImage: "ghcr.io/anomalyco/opencode:latest"
+  # Pin the OpenCode release: hermit generates the native 2.x config schema.
+  opencodeInitImage: "ghcr.io/anomalyco/opencode:2.1.4"
   opencodeInitBinPath: "/usr/local/bin/opencode"
   workspace: /workspace
   # Project policy file extracted from the base commit and handed to reviewers.
@@ -71,6 +72,10 @@ config:
   podImagePullPolicy: IfNotPresent
   opencodeInitImagePullPolicy: IfNotPresent
   opencodeTimeoutSeconds: 900
+  # Cap on the diff injected into the review prompt (UTF-8 bytes).
+  maxPromptDiffBytes: 65536
+  # Maximum number of model steps per review (opencode agent `steps`).
+  reviewMaxSteps: 12
   maxConcurrentJobs: 20
   maxBodyBytes: 10485760
   rateLimitPerIp: 60

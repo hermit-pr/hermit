@@ -55,8 +55,16 @@ External systems:
       merge requests are fetched through `refs/pull/<n>/head` or the
       `source_repo` remote; in all cases the code being reviewed is the PR/MR
       head, never the destination branch;
-   b. runs `opencode` in the checked-out workspace against the on-premise
-      vLLM endpoint, with the diff and the review rules in the prompt.
+   b. runs `opencode` in the checked-out clone against the on-premise vLLM
+      endpoint. The computed diff (`git diff target-branch`, capped by
+      `HERMIT_MAX_PROMPT_DIFF_BYTES` with an explicit truncation notice) is
+      injected into the prompt as the single source of truth, so the reviewer
+      never has to reconstruct the change by walking the tree. The generated
+      OpenCode 2 configuration pins the provider (`policies`), allows only
+      read-only discovery plus an inspection-only shell allowlist, and bounds
+      the run with a `steps` budget (`HERMIT_REVIEW_MAX_STEPS`); every run uses
+      `--standalone` so a configuration shipped by the reviewed repository
+      cannot override it.
 4. The slave POSTs the resulting review text to the master's internal endpoint
    `/internal/report/<job_id>`, authenticated with the per-review report
    secret (the master reconstructs the job from the durable Secret, so any
@@ -83,13 +91,16 @@ processed the same way:
 
 ### Review output format
 
-The prompt handed to opencode always asks for a single markdown review with
-four explicit sections, in this order:
+The agent is instructed to answer with exactly one JSON code block:
 
-- **Critical changes that need to be fixed** - bugs, security holes, crashes;
-- **Medium issues** - logic problems, missing edge cases, error handling;
-- **Low issues** - style, naming, minor refactors;
-- **General feedback** - overall assessment and suggestions.
+```json
+{"critical": [], "medium": [], "low": [], "verdict": "Approve"}
+```
+
+Each finding is `{"title", "detail", "fix"}`. The slave reformats the verdict
+into markdown sections (Critical / Medium / Low / Verdict) and posts that. A
+response without a parseable verdict is treated as a failure: the job fails and
+the commit status is set to error, so an empty "Approve" is never published.
 
 The default `HERMIT_REVIEW_RULES` encodes this structure so every review,
 automatic or manual, is formatted identically.
@@ -213,7 +224,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from base commit (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | opencode binary path inside pods |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode args |
-| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:latest`) |
+| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:2.1.4`) |
 | `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess (default 900) |
 | `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods in flight per replica (default 20) |
 | `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |
