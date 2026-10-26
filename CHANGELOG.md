@@ -5,6 +5,83 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-26
+
+### Changed (breaking)
+
+- **OpenCode 2.x is now required.** The generated `opencode.json` uses the
+  native 2.x schema instead of the legacy 1.x one: ordered `permissions`,
+  non-overridable `policies`, an `agents` entry (`system`, `steps`, `model`
+  with a variant), and `providers` with an explicit package, model, and
+  capabilities. Previously the file relied on OpenCode's 1.x compatibility
+  layer, which silently mapped the tool names and could leave the reviewer
+  without a shell. The chart default init image is pinned to
+  `ghcr.io/anomalyco/opencode:2.1.4`, and the reviewer logs (and warns about)
+  the opencode version it finds. See
+  [#8](https://gitlab.com/hermit-bot/hermit/-/work_items/8).
+- **Every review now runs with `--standalone`, with project configuration
+  disabled.** In 2.x a plain `opencode run` attaches to the shared background
+  server, which ignores the per-invocation environment and therefore
+  `OPENCODE_CONFIG`. Worse, a repository-supplied `opencode.json`/agent was
+  still merged in and could **replace the reviewer's system prompt** (verified:
+  a hostile `AGENTS`-style agent definition won over the generated one) as well
+  as widen its tool permissions and redirect inference to another endpoint. The
+  reviewer now starts a private server and sets
+  `OPENCODE_DISABLE_PROJECT_CONFIG`/`OPENCODE_CONFIG_PROJECT_DISABLE`, so only
+  the generated configuration is loaded.
+
+### Fixed
+
+- **The reviewer no longer depends on the agent running `git diff`.** The
+  computed diff and its `--stat` summary are injected into the prompt (capped
+  at `HERMIT_MAX_PROMPT_DIFF_BYTES`, with an explicit truncation notice and the
+  command needed to inspect the rest). Weak models can no longer return an
+  empty verdict, and agentic models no longer walk the whole tree until the
+  context window is exhausted. See
+  [#9](https://gitlab.com/hermit-bot/hermit/-/work_items/9).
+- **The prompted diff command now works on a shallow clone.** The previous
+  instruction, `git diff target-branch...HEAD`, fails with `no merge base` in
+  the `--depth 1` clone hermit builds; the prompt now uses the two-dot form
+  (`git diff target-branch -- <path>`), matching the diff hermit computes.
+- **opencode now resolves the project to the clone.** The subprocess `cwd` was
+  set correctly, but `PWD` still pointed at the master's directory and OpenCode
+  resolves its project Location from it, so shell commands ran outside the
+  checkout.
+- **A review without a structured verdict is a failure.** When the model
+  answers in prose (or not at all), the job now fails and the commit status is
+  set to error instead of posting an empty or misleading review.
+- **`opencode stderr` is logged at debug level** and truncated on failure, so
+  server logs no longer flood the reviewer output.
+
+### Added
+
+- `HERMIT_MAX_PROMPT_DIFF_BYTES` (default `65536`) — cap on the injected diff.
+- `HERMIT_REVIEW_MAX_STEPS` (default `12`) — model step budget for the review
+  agent, enforced with the native `steps` setting.
+- The generated configuration bounds tool output (`tool_output`) and disables
+  snapshots, updates, model discovery, and free models.
+
+### Security
+
+- Reviewer tool use is deny-by-default: read/glob/grep plus an inspection-only
+  shell allowlist (`git diff`, `git show`, `git log`, `git status`,
+  `git rev-parse`, `git branch`, `git describe`, `ls`); edit, webfetch,
+  websearch, subagent, question, execute, and external directories are blocked.
+- The checkout cannot inject reviewer configuration: project-level
+  `opencode.json`/`opencode.jsonc`, agents, and plugins are disabled for the
+  run, and hard denials are additionally expressed as `policies` (which project
+  configuration could not override anyway).
+- MCP servers, skills, and plugins from the checkout are never loaded.
+- The vLLM provider is the only usable provider, and the bundled native
+  OpenAI-compatible package is used so no npm package is fetched.
+
+### Upgrade notes
+
+- Bump the init image if you override it: `config.opencodeInitImage` must point
+  at an OpenCode 2.x image (the chart default is now `2.1.4`).
+- If you bundle `opencode` in the reviewer image (`opencodeInitImage: ""`),
+  install 2.x there as well; older versions reject the generated schema.
+
 ## [0.3.4] - 2026-08-17
 
 ### Fixed
