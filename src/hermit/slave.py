@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import re
 import signal
 import sys
 
@@ -15,28 +14,31 @@ from hermit.git import (
     askpass_env,
     authenticated_url,
     clone_and_diff,
+    diff_stat,
     ensure_commit,
     extract_policy,
     write_askpass,
 )
 from hermit.logging_config import configure_logging
-from hermit.opencode import OpenCodeRunner, extract_json_verdict
+from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
 from hermit.report import report_failure, report_review
 from hermit.secretscan import scan_for_secrets
+from hermit.verdict import parse_verdict, render_markdown
 
 logger = logging.getLogger(__name__)
 
 
 async def _prepare_repository(
     settings: SlaveSettings, workspace: str
-) -> tuple[str, str, bool, str]:
+) -> tuple[str, str, str, bool, str]:
     """Clone the repository, compute the diff and extract the policy file.
 
-    Returns a ``(diff, policy_path, extracted, repo_dir)`` tuple where
-    ``extracted`` is ``True`` when the policy file was found at the base
-    commit and ``repo_dir`` is the directory the repository was cloned into
-    (used as the working directory for opencode).
+    Returns a ``(diff, stat, policy_path, extracted, repo_dir)`` tuple where
+    ``stat`` is the ``git diff --stat`` summary, ``extracted`` is ``True`` when
+    the policy file was found at the base commit and ``repo_dir`` is the
+    directory the repository was cloned into (used as the working directory for
+    opencode).
 
     Raises:
         ValueError: if the computed diff is empty.
@@ -70,6 +72,7 @@ async def _prepare_repository(
     if not diff.strip():
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
+    stat = await asyncio.to_thread(diff_stat, repo_dir)
     policy_path = os.path.join(repo_dir, ".hermit-policy.md")
     if settings.base_sha:
         await asyncio.to_thread(ensure_commit, repo_dir, settings.base_sha, env=env)
@@ -91,7 +94,7 @@ async def _prepare_repository(
             "policy file %s not found at base commit, skipping",
             settings.policy_file_path,
         )
-    return diff, policy_path, extracted, repo_dir
+    return diff, stat, policy_path, extracted, repo_dir
 
 
 async def run_review(settings: SlaveSettings) -> str:
@@ -107,7 +110,7 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.base_ref,
         settings.head_ref,
     )
-    diff, policy_path, extracted, repo_dir = await _prepare_repository(
+    diff, stat, policy_path, extracted, repo_dir = await _prepare_repository(
         settings, workspace
     )
     prompt = build_review_prompt(
@@ -119,6 +122,9 @@ async def run_review(settings: SlaveSettings) -> str:
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
         policy_extract_path=policy_path if extracted else "",
+        diff=diff,
+        diff_stat=stat,
+        max_diff_bytes=settings.max_prompt_diff_bytes,
     )
     runner = OpenCodeRunner(
         settings.opencode_bin,
@@ -132,23 +138,24 @@ async def run_review(settings: SlaveSettings) -> str:
         review_rules=settings.review_rules,
         timeout=settings.opencode_timeout_seconds,
         cwd=repo_dir,
+        max_steps=settings.review_max_steps,
     )
     logger.info(
-        "invoking opencode against vLLM endpoint (model=%s)",
+        "invoking opencode against vLLM endpoint (model=%s, max_steps=%d)",
         settings.model,
+        settings.review_max_steps,
     )
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
     logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
-    markdown = extract_json_verdict(output)
-    if markdown is not None:
-        output = markdown
-        logger.info("parsed JSON verdict (%d bytes)", len(output))
-    else:
-        logger.info("no valid JSON found, falling back to heading strip")
-        match = re.search(r"^#+\s+", output, re.MULTILINE)
-        if match:
-            output = output[match.start() :]
+    review = parse_verdict(output, diff)
+    output = render_markdown(review)
+    logger.info(
+        "validated verdict %r with %d finding(s), dropped %d outside the diff",
+        review.verdict,
+        len(review.findings),
+        review.dropped,
+    )
     header = (
         f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
     )

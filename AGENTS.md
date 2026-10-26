@@ -30,6 +30,17 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 
 **MANDATORY before every commit.** Run the full GitLab CI pipeline and GitHub CI pipeline locally to ensure nothing is broken.
 
+The `check` job lints the whole working tree (`black .`, `isort .`), so a local
+`venv/` inside the repository would be scanned too. Run the pipeline on a clean
+copy instead of the working tree:
+
+```bash
+rm -rf /tmp/hermit-ci && mkdir -p /tmp/hermit-ci
+rsync -a --exclude venv --exclude .git --exclude .env \
+  --exclude '__pycache__' --exclude '.pytest_cache' ./ /tmp/hermit-ci/
+cd /tmp/hermit-ci   # then run the docker command below from here
+```
+
 ### GitLab CI (lint + test + shell/bash + helm checks)
 
 ```bash
@@ -64,6 +75,14 @@ This replicates the `build` job in `.github/workflows/docker-build.yml`. The ima
 - flake8 uses `.flake8` (its 7.x cannot read `pyproject.toml`); black/isort/pylint config lives in `pyproject.toml`.
 - Line length 88 for Python; shell scripts use 2-space indentation (`shfmt -i 2`).
 
+## Language
+
+Everything produced in this repository is written in **English**: source code,
+identifiers, comments, docstrings, log messages, tests, commit messages,
+merge-request titles and descriptions, issue comments, and documentation.
+Never mix French (or any other language) into code, commits, or MRs — including
+inline comments, changelog entries, and review descriptions.
+
 ## Local dev secrets
 
 Developer credentials (for example a fine-grained GitLab PAT used by `opencode`
@@ -92,7 +111,13 @@ the repo root — never in the tree.
 
 ## CI constraints
 
-- GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus a single `check` job (lint, test, shellcheck, shfmt, helm lint). Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
+- GitLab CI only, and pipelines run on `v*` tags only (`.gitlab-ci.yml`
+  `workflow.rules`): branches and merge requests have no CI. Run the checks
+  locally before every push (the commands above replicate the `check` job).
+  A tag pipeline runs **Secret Detection** (enabled) + SAST, plus the single
+  `check` job (lint, test, shellcheck, shfmt, helm lint). Never commit real
+  tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must
+  stay empty in the repo.
 - **NEVER put secrets, tokens, or any sensitive values in `values.yaml`.** The chart must always reference existing Kubernetes Secrets via ``secretName``/``secretKey`` and renders ``secretKeyRef`` entries. Inline token values are forbidden by design.
 - Docker build and Helm package are handled on the GitHub mirror (`.github/workflows/docker-build.yml`), not on GitLab.
 - GitHub mirror: pushes to `ghcr.io/hermit-pr/hermit` on main commits and semver tags; Helm chart pushed to OCI on tags only.

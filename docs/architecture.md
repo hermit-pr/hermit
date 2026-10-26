@@ -55,8 +55,19 @@ External systems:
       merge requests are fetched through `refs/pull/<n>/head` or the
       `source_repo` remote; in all cases the code being reviewed is the PR/MR
       head, never the destination branch;
-   b. runs `opencode` in the checked-out workspace against the on-premise
-      vLLM endpoint, with the diff and the review rules in the prompt.
+   b. runs `opencode` in the checked-out clone against the on-premise vLLM
+      endpoint. The prompt is passed as a **file attachment**
+      (`opencode run --file …`): a bare path argument is sent to the model as
+      literal text, so the agent never saw the PR context, the diff, or the
+      review instructions. The computed diff (`git diff target-branch`, capped
+      by `HERMIT_MAX_PROMPT_DIFF_BYTES` with an explicit truncation notice) is
+      injected into that prompt as the single source of truth, so the reviewer
+      never has to reconstruct the change by walking the tree. The generated
+      OpenCode 2 configuration pins the provider (`policies`), allows only
+      read-only discovery plus an inspection-only shell allowlist, and bounds
+      the run with a `steps` budget (`HERMIT_REVIEW_MAX_STEPS`); every run uses
+      `--standalone` so a configuration shipped by the reviewed repository
+      cannot override it.
 4. The slave POSTs the resulting review text to the master's internal endpoint
    `/internal/report/<job_id>`, authenticated with the per-review report
    secret (the master reconstructs the job from the durable Secret, so any
@@ -83,13 +94,33 @@ processed the same way:
 
 ### Review output format
 
-The prompt handed to opencode always asks for a single markdown review with
-four explicit sections, in this order:
+The agent must answer with exactly one JSON block:
 
-- **Critical changes that need to be fixed** - bugs, security holes, crashes;
-- **Medium issues** - logic problems, missing edge cases, error handling;
-- **Low issues** - style, naming, minor refactors;
-- **General feedback** - overall assessment and suggestions.
+```json
+{
+  "summary": "what the change does and whether it is safe",
+  "critical": [],
+  "medium": [
+    {"title": "...", "file": "path", "line": 12,
+     "anchor": "exact added or removed line",
+     "impact": "why this change breaks X", "detail": "...", "fix": "..."}
+  ],
+  "low": [],
+  "verdict": "Approve"
+}
+```
+
+`summary` is mandatory, including for approvals, and every finding must quote
+one added or removed line in `anchor`. That quote is the scope contract: the
+slave checks it against the injected diff and drops findings that quote nothing
+in it, so findings about untouched code cannot reach the PR/MR. Cross-file
+impact is still reported — the anchor is the changed line, while `file`/`impact`
+name what it breaks elsewhere.
+
+A review without JSON, without a summary, or asking for changes with no
+anchored finding is a failure: the job fails, the commit status is set to
+error, and no comment is posted. A valid review is rendered as a Summary block,
+Critical/Medium/Low sections, and the verdict.
 
 The default `HERMIT_REVIEW_RULES` encodes this structure so every review,
 automatic or manual, is formatted identically.
@@ -213,7 +244,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from base commit (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | opencode binary path inside pods |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode args |
-| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:latest`) |
+| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:2.1.4`) |
 | `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess (default 900) |
 | `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods in flight per replica (default 20) |
 | `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |

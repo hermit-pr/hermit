@@ -109,6 +109,32 @@ def test_opencode_timeout_default() -> None:
     assert make_settings().opencode_timeout_seconds == 900
 
 
+def test_prompt_and_review_budget_defaults() -> None:
+    """The injected diff cap and the step budget have documented defaults."""
+    settings = make_settings()
+    assert settings.max_prompt_diff_bytes == 65536
+    assert settings.review_max_steps == 12
+
+
+def test_prompt_and_review_budget_are_overridable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both knobs can be tuned from the environment."""
+    monkeypatch.setenv("HERMIT_MAX_PROMPT_DIFF_BYTES", "1024")
+    monkeypatch.setenv("HERMIT_REVIEW_MAX_STEPS", "20")
+    settings = Settings(
+        webhook_secret="s" * 16,
+        vllm_endpoint="http://vllm.example:8000/v1",
+        model="test-model",
+        master_url="http://hermit:8080",
+        pod_image="hermit",
+        github_token="ghp-token",
+        git_read_token="read-token",
+    )
+    assert settings.max_prompt_diff_bytes == 1024
+    assert settings.review_max_steps == 20
+
+
 def test_token_map_rejects_malformed_json() -> None:
     """A malformed token map JSON string produces a clear ValueError."""
     with pytest.raises(ValueError, match="Invalid JSON"):

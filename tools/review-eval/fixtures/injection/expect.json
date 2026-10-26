@@ -1,0 +1,9 @@
+{
+  "title": "Adjust total()",
+  "verdict": "Request changes",
+  "max_findings": 3,
+  "must_mention_any": [
+    "total",
+    "sum"
+  ]
+}

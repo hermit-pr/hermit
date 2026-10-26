@@ -22,6 +22,7 @@ from hermit.git import (
 from hermit.prompt import build_review_prompt
 from hermit.report import report_review
 from hermit.slave import run_review
+from hermit.verdict import VerdictError
 
 
 def test_authenticated_url_uses_github_username() -> None:
@@ -46,7 +47,7 @@ def test_build_review_prompt_includes_rules_and_instructions() -> None:
         pr_body="Implements the missing endpoint.",
     )
     assert "Review this github pull request" in prompt
-    assert "git diff target-branch...HEAD" in prompt
+    assert "git diff target-branch -- <path>" in prompt
     assert "acme/app #42" in prompt
     assert "Add endpoint" in prompt
     assert "Implements the missing endpoint." in prompt
@@ -54,7 +55,7 @@ def test_build_review_prompt_includes_rules_and_instructions() -> None:
 
 
 def test_build_review_prompt_prioritizes_diff_instruction() -> None:
-    """The diff is a mandatory first step before any other instruction."""
+    """The injected diff is declared the single source of truth, up front."""
     prompt = build_review_prompt(
         "github",
         "acme/app",
@@ -62,8 +63,51 @@ def test_build_review_prompt_prioritizes_diff_instruction() -> None:
         pr_title="Add endpoint",
     )
     assert prompt.startswith("CRITICAL")
-    assert "git diff target-branch...HEAD --stat" in prompt
+    assert "single source of truth" in prompt
     assert "post-change state" in prompt
+
+
+def test_build_review_prompt_forbids_the_three_dot_diff() -> None:
+    """The prompt warns that a shallow clone has no merge base."""
+    prompt = build_review_prompt("github", "acme/app", "42")
+    assert "shallow" in prompt
+    assert "never the three-dot form" in prompt
+    assert "git diff target-branch...HEAD" in prompt
+
+
+def test_build_review_prompt_injects_diff_and_stat() -> None:
+    """The computed diff and its stat summary are embedded between markers."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        diff="--- a/file.txt\n+++ b/file.txt\n@@ -1 +1,2 @@\n line1\n+line2\n",
+        diff_stat=" file.txt | 2 +-\n 1 file changed, 1 insertion(+)",
+    )
+    assert "BEGIN PULL REQUEST DIFF" in prompt
+    assert "+line2" in prompt
+    assert "file.txt | 2 +-" in prompt
+    assert "END PULL REQUEST DIFF" in prompt
+    assert "truncated" not in prompt
+
+
+def test_build_review_prompt_truncates_oversized_diff() -> None:
+    """An oversized diff is capped and the truncation is announced."""
+    diff = "".join(f"+line {index}\n" for index in range(500))
+    prompt = build_review_prompt(
+        "github", "acme/app", "42", diff=diff, max_diff_bytes=256
+    )
+    assert "+line 0" in prompt
+    assert "+line 499" not in prompt
+    assert "diff truncated" in prompt
+    assert "git diff target-branch -- <path>" in prompt
+
+
+def test_build_review_prompt_without_diff_asks_for_it() -> None:
+    """A missing diff falls back to an explicit instruction, never silence."""
+    prompt = build_review_prompt("github", "acme/app", "42", diff="")
+    assert "No diff was supplied" in prompt
+    assert "git diff target-branch" in prompt
 
 
 def test_build_review_prompt_neutralizes_pr_content() -> None:
@@ -120,12 +164,51 @@ async def test_report_review_posts_to_master() -> None:
 class _FakeRunner:
     """Stands in for OpenCodeRunner, returning a canned review body."""
 
-    def __init__(self, output: str) -> None:
+    def __init__(self, output: str, **kwargs: object) -> None:
         self._output = output
+        self.prompt = ""
+        self.kwargs = kwargs
 
-    async def run(self, _prompt: str) -> str:
-        """Return the canned output without running a subprocess."""
+    async def run(self, prompt: str) -> str:
+        """Record the prompt and return the canned output."""
+        self.prompt = prompt
         return self._output
+
+
+def _verdict(body: str = "no findings") -> str:
+    """Return an opencode output containing a valid, anchored verdict."""
+    payload = {
+        "summary": "Adds a line to the sample file.",
+        "medium": [
+            {
+                "title": body,
+                "file": "file.txt",
+                "line": 2,
+                "anchor": "line",
+                "impact": "the change is incomplete",
+                "detail": "detail",
+                "fix": "fix",
+            }
+        ],
+        "verdict": "Request changes",
+    }
+    return f"```json\n{json.dumps(payload)}\n```"
+
+
+def _slave_settings(tmp_path: Path) -> SlaveSettings:
+    """Build minimal slave settings pointing at a temporary workspace."""
+    return SlaveSettings(
+        job_id="job1",
+        git_read_token="read-token",
+        repo="acme/app",
+        ref="42",
+        vllm_endpoint="http://vllm.example:8000/v1",
+        model="test-model",
+        master_url="http://hermit:8080",
+        report_secret="s3cr3t",
+        workspace=str(tmp_path),
+        max_prompt_diff_bytes=4096,
+    )
 
 
 @pytest.mark.asyncio
@@ -140,33 +223,50 @@ async def test_review_includes_header(
         reported["body"] = args[3]
 
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
-    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: False)
-    runner_kwargs: dict = {}
+    monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
+    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: True)
+    runners: list[_FakeRunner] = []
 
     def fake_runner(*_args, **kwargs) -> _FakeRunner:
         """Capture the OpenCodeRunner kwargs for assertion."""
-        runner_kwargs.update(kwargs)
-        return _FakeRunner("the review body")
+        runners.append(_FakeRunner(_verdict("structured finding"), **kwargs))
+        return runners[0]
 
     monkeypatch.setattr("hermit.slave.OpenCodeRunner", fake_runner)
     monkeypatch.setattr("hermit.slave.report_review", fake_report)
-    settings = SlaveSettings(
-        job_id="job1",
-        git_read_token="read-token",
-        repo="acme/app",
-        ref="42",
-        vllm_endpoint="http://vllm.example:8000/v1",
-        model="test-model",
-        master_url="http://hermit:8080",
-        report_secret="s3cr3t",
-        workspace=str(tmp_path),
-    )
-    body = await run_review(settings)
+    body = await run_review(_slave_settings(tmp_path))
     assert body.startswith("## 🤖 H.E.R.M.I.T Code Review v")
     assert "test-model" in body
-    assert "the review body" in body
+    assert "## Medium findings" in body
+    assert "structured finding" in body
     assert reported["body"] == body
-    assert runner_kwargs["cwd"] == str(tmp_path / "repo")
+    assert runners[0].kwargs["cwd"] == str(tmp_path / "repo")
+    assert runners[0].kwargs["max_steps"] == 12
+    assert "+line" in runners[0].prompt
+    assert "file.txt | 1 +" in runners[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_review_fails_without_structured_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Free-form output is an error: an empty review must never be posted."""
+    reported: dict = {}
+
+    async def fake_report(*args) -> None:
+        """Capture the body passed to the real report function."""
+        reported["body"] = args[3]
+
+    monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
+    monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
+    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("Approve")
+    )
+    monkeypatch.setattr("hermit.slave.report_review", fake_report)
+    with pytest.raises(VerdictError, match="no JSON verdict"):
+        await run_review(_slave_settings(tmp_path))
+    assert "body" not in reported
 
 
 @pytest.mark.skipif(

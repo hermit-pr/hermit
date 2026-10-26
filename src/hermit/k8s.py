@@ -76,6 +76,8 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_VLLM_ENDPOINT": settings.vllm_endpoint,
         "HERMIT_MODEL": settings.model,
         "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
+        "HERMIT_MAX_PROMPT_DIFF_BYTES": str(settings.max_prompt_diff_bytes),
+        "HERMIT_REVIEW_MAX_STEPS": str(settings.review_max_steps),
         "HERMIT_OPENCODE_BIN": opencode_bin,
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,

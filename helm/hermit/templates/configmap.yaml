@@ -37,6 +37,8 @@ data:
   HERMIT_MAX_BODY_BYTES: {{ int .Values.config.maxBodyBytes | quote }}
   HERMIT_MAX_CONCURRENT_JOBS: {{ .Values.config.maxConcurrentJobs | quote }}
   HERMIT_OPENCODE_TIMEOUT_SECONDS: {{ .Values.config.opencodeTimeoutSeconds | quote }}
+  HERMIT_MAX_PROMPT_DIFF_BYTES: {{ int .Values.config.maxPromptDiffBytes | quote }}
+  HERMIT_REVIEW_MAX_STEPS: {{ int .Values.config.reviewMaxSteps | quote }}
   HERMIT_ABANDONED_JOB_TIMEOUT_SECONDS: {{ .Values.config.abandonedJobTimeoutSeconds | quote }}
   HERMIT_OPENCODE_INIT_IMAGE_PULL_POLICY: {{ .Values.config.opencodeInitImagePullPolicy | quote }}
   HERMIT_POD_IMAGE_PULL_POLICY: {{ .Values.config.podImagePullPolicy | quote }}
