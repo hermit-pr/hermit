@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   empty verdict, and agentic models no longer walk the whole tree until the
   context window is exhausted. See
   [#9](https://gitlab.com/hermit-bot/hermit/-/work_items/9).
+- **The review prompt is now actually delivered to the model.** Hermit ran
+  `opencode run <prompt-path>`: the argument is sent as literal message text,
+  so the model received a filesystem path instead of the PR context, the diff,
+  the policy location, and the review instructions, and had to recover by
+  running `git diff` on its own. Models that did not (the reported Gemma
+  behaviour) answered blindly with an empty "Approve". The prompt is now
+  attached with `--file`, which also avoids Linux's 128 KiB per-argument
+  limit, and the evaluation harness shows the difference: 2-3 tool calls with
+  the attached prompt versus 10-15 when the model had to reconstruct the
+  change.
 - **The prompted diff command now works on a shallow clone.** The previous
   instruction, `git diff target-branch...HEAD`, fails with `no merge base` in
   the `--depth 1` clone hermit builds; the prompt now uses the two-dot form
@@ -55,6 +65,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Diff-scoped findings.** Every finding must quote one added or removed line
+  in `anchor`, and every review must carry a `summary` (also for approvals).
+  The slave verifies both against the injected diff, drops findings that quote
+  nothing in it, and fails the review when `Request changes` has no anchored
+  finding left. This is what keeps a small model from reporting pre-existing
+  issues in code the change never touched, while still allowing cross-file
+  impact to be reported from the changed line.
+- **Reworked review prompt.** The agent is told that only lines caused by the
+  diff are in scope, that pre-existing bugs, untouched style, unrelated tests,
+  and speculation are out of scope, and that `read`/`grep`/`glob` are for
+  verifying at most five concrete hypotheses raised by the change. The
+  `summary` requirement is what makes an approval meaningful instead of a bare
+  "Approve".
+- **Review evaluation harness** (`tools/review-eval`): three fixtures covering
+  review noise (a pre-existing bug outside the diff), missed cross-file impact
+  (a rename that forgets a caller), and instructions injected into the diff,
+  plus a script that replays the production prompt against any model and
+  reports the verdict, findings, dropped anchors, and tool calls. It is how the
+  prompt was tuned, and how a candidate model is validated before deployment.
 - `HERMIT_MAX_PROMPT_DIFF_BYTES` (default `65536`) — cap on the injected diff.
 - `HERMIT_REVIEW_MAX_STEPS` (default `12`) — model step budget for the review
   agent, enforced with the native `steps` setting.

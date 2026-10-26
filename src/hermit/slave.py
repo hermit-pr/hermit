@@ -20,10 +20,11 @@ from hermit.git import (
     write_askpass,
 )
 from hermit.logging_config import configure_logging
-from hermit.opencode import OpenCodeRunner, extract_json_verdict
+from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
 from hermit.report import report_failure, report_review
 from hermit.secretscan import scan_for_secrets
+from hermit.verdict import parse_verdict, render_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -147,14 +148,14 @@ async def run_review(settings: SlaveSettings) -> str:
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
     logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
-    markdown = extract_json_verdict(output)
-    if markdown is None:
-        logger.error(
-            "no structured JSON verdict in the opencode output (%d bytes)", len(output)
-        )
-        raise ValueError("opencode produced no structured JSON verdict")
-    output = markdown
-    logger.info("parsed JSON verdict (%d bytes)", len(output))
+    review = parse_verdict(output, diff)
+    output = render_markdown(review)
+    logger.info(
+        "validated verdict %r with %d finding(s), dropped %d outside the diff",
+        review.verdict,
+        len(review.findings),
+        review.dropped,
+    )
     header = (
         f"## 🤖 H.E.R.M.I.T Code Review v{__version__}\n*Model: `{settings.model}`*\n\n"
     )

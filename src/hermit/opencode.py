@@ -30,12 +30,18 @@ MODEL_VARIANT = "hermit"
 MODEL_TEMPERATURE = 0.1
 TOOL_OUTPUT_MAX_LINES = 400
 TOOL_OUTPUT_MAX_BYTES = 16384
+REVIEW_MESSAGE = "Review the pull request in the attached file."
 
 #: Read-only shell commands the reviewer may run.  OpenCode 2 matches the
 #: ``resource`` against the scanned command string and a trailing ``" *"`` also
 #: matches the bare command.  The pull-request diff is injected into the prompt,
 #: so shell access only exists to cross-check the target branch: nothing that
 #: writes files, reaches the network, or spawns arbitrary processes is listed.
+#: `cat`, `grep`, and `find` are deliberately absent: the dedicated `read`,
+#: `grep`, and `glob` tools already cover them, are permission-scoped (a
+#: checkout cannot read outside the clone) and bounded by ``tool_output``,
+#: whereas shell globs are only checked by a best-effort command scanner and
+#: `find -exec` would bypass the allowlist entirely.
 SHELL_ALLOWLIST: tuple[str, ...] = (
     "git diff *",
     "git log *",
@@ -172,38 +178,6 @@ def extract_text(stdout: str) -> str:
     result = "".join("".join(texts) for texts in messages.values()).strip()
     result = re.sub(r"<thinking>.*?</thinking>", "", result, flags=re.DOTALL).strip()
     return result
-
-
-def extract_json_verdict(output: str) -> str | None:
-    """Parse the last JSON code block from *output* and reformat as markdown.
-
-    Returns ``None`` if no valid JSON with a ``verdict`` key is found; the
-    caller then fails the review instead of posting free-form model output.
-    """
-    blocks = re.findall(r"```json\s*(.*?)\s*```", output, re.DOTALL)
-    if not blocks:
-        return None
-    try:
-        data = json.loads(blocks[-1])
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict) or "verdict" not in data:
-        return None
-    lines: list[str] = []
-    for severity in ("critical", "medium", "low"):
-        findings = data.get(severity, [])
-        if not findings:
-            continue
-        lines.append(f"## {severity.capitalize()} issues\n")
-        for finding in findings:
-            if isinstance(finding, dict):
-                lines.append(
-                    f"### {finding.get('title', 'Untitled')}\n\n"
-                    f"{finding.get('detail', '')}\n\n"
-                    f"**Fix**: {finding.get('fix', 'N/A')}\n"
-                )
-    lines.append(f"## Verdict\n\n**{data['verdict']}**")
-    return "\n".join(lines)
 
 
 class OpenCodeRunner:
@@ -355,9 +329,12 @@ class OpenCodeRunner:
     async def run(self, prompt: str) -> str:
         """Execute opencode with ``prompt`` and return its extracted output.
 
-        The prompt is written to a file inside the workspace so it never
-        appears in the process argument list (visible via ``/proc``) and is
-        not limited by the OS argument length.
+        The prompt is attached with ``--file`` rather than passed as the
+        message: a bare path argument is sent to the model as literal text (the
+        model never sees the prompt), and inline content would be limited by
+        the 128 KiB per-argument limit while pull-request bodies and diffs can
+        be larger. The file is still written to the workspace for post-mortem
+        debugging.
 
         Raises:
             RuntimeError: if opencode exits non-zero or emits no text.
@@ -373,15 +350,18 @@ class OpenCodeRunner:
             "--standalone",
             "--agent",
             AGENT_NAME,
+            "--file",
+            str(prompt_path),
             "--auto",
             "--format",
             "json",
-            str(prompt_path),
+            REVIEW_MESSAGE,
         ]
         logger.info(
-            "running opencode run --standalone --agent %s "
+            "running opencode run --standalone --agent %s --file %s "
             "--auto --format json (model=%s, max_steps=%d)",
             AGENT_NAME,
+            prompt_path,
             self._model,
             self._max_steps,
         )

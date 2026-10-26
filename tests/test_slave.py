@@ -22,6 +22,7 @@ from hermit.git import (
 from hermit.prompt import build_review_prompt
 from hermit.report import report_review
 from hermit.slave import run_review
+from hermit.verdict import VerdictError
 
 
 def test_authenticated_url_uses_github_username() -> None:
@@ -175,9 +176,20 @@ class _FakeRunner:
 
 
 def _verdict(body: str = "no findings") -> str:
-    """Return an opencode output containing a structured JSON verdict."""
+    """Return an opencode output containing a valid, anchored verdict."""
     payload = {
-        "medium": [{"title": body, "detail": "detail", "fix": "fix"}],
+        "summary": "Adds a line to the sample file.",
+        "medium": [
+            {
+                "title": body,
+                "file": "file.txt",
+                "line": 2,
+                "anchor": "line",
+                "impact": "the change is incomplete",
+                "detail": "detail",
+                "fix": "fix",
+            }
+        ],
         "verdict": "Request changes",
     }
     return f"```json\n{json.dumps(payload)}\n```"
@@ -225,7 +237,7 @@ async def test_review_includes_header(
     body = await run_review(_slave_settings(tmp_path))
     assert body.startswith("## 🤖 H.E.R.M.I.T Code Review v")
     assert "test-model" in body
-    assert "## Medium issues" in body
+    assert "## Medium findings" in body
     assert "structured finding" in body
     assert reported["body"] == body
     assert runners[0].kwargs["cwd"] == str(tmp_path / "repo")
@@ -252,7 +264,7 @@ async def test_review_fails_without_structured_verdict(
         "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("Approve")
     )
     monkeypatch.setattr("hermit.slave.report_review", fake_report)
-    with pytest.raises(ValueError, match="no structured JSON verdict"):
+    with pytest.raises(VerdictError, match="no JSON verdict"):
         await run_review(_slave_settings(tmp_path))
     assert "body" not in reported
 

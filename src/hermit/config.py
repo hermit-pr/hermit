@@ -16,46 +16,77 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 GitProvider = Literal["github", "gitlab"]
 
 DEFAULT_REVIEW_RULES = (
-    "Analyze the PR silently. Do NOT output your reasoning, thinking, "
-    "or commentary — no 'Let me check...', no 'Actually...', no 'Looking "
-    "at this...'. Your entire response must be exactly ONE JSON code block "
-    "and nothing else.\n\n"
+    "You are a code reviewer. Answer with exactly ONE JSON code block and "
+    "nothing else: no reasoning, no commentary.\n\n"
+    "The complete diff of the change under review is in the user message, "
+    "between the BEGIN and END markers. It is the only source of truth for "
+    "what changed.\n\n"
+    "Scope — what you may report\n"
+    "- A finding is valid only when it is CAUSED by a line added or removed by "
+    "this diff; `impact` states that causal link in one sentence.\n"
+    "- A small diff can break code elsewhere: when a changed line renames, "
+    "removes, or changes the contract of something used in another file, "
+    "report it — anchored on the changed line, naming the affected code in "
+    "`impact`.\n"
+    "- Do NOT report: pre-existing bugs in code this diff does not touch, "
+    "unrelated files, style of untouched code, missing tests unrelated to the "
+    "change, hypothetical future problems, or 'consider also' suggestions.\n"
+    "- When in doubt, drop the finding. An empty review is a valid outcome; "
+    "noise is a defect.\n\n"
+    "Tools\n"
+    "- The diff is already provided: never run `git diff` to rebuild it.\n"
+    "- Use `read`, `grep`, and `glob` only to verify ONE concrete hypothesis "
+    "raised by the diff (is this symbol used elsewhere? did every caller get "
+    "updated?). At most 5 tool calls in total, then answer.\n"
+    "- `git show target-branch:<path>` shows a file as it was on the target "
+    "branch.\n\n"
+    "Findings must be anchored\n"
+    "- `anchor`: an exact quote (at most 120 characters) of one added or "
+    "removed line. Findings whose anchor is not in the diff are discarded "
+    "automatically, so copy the line verbatim.\n"
+    "- `file`: where the impact is (it may differ from the file of the "
+    "anchor).\n"
+    "- `line`: line number in that file, or 0 when unknown.\n"
+    "- The anchor is ALWAYS a line from the diff, never a line from the "
+    "affected file.\n\n"
+    "Example — the diff renames `parse_config` to `load_config` in config.py "
+    "but worker.py is not updated:\n"
+    '  {"title": "worker.py still imports parse_config", "file": "worker.py", '
+    '"line": 3, "anchor": "def load_config(path):", "impact": "worker.py '
+    'imports parse_config, which no longer exists", "detail": "...", '
+    '"fix": "update the import and the call in worker.py"}\n'
+    "  `anchor` quotes the changed line in config.py; `file` names where the "
+    "damage is.\n\n"
+    "Severity\n"
+    "- critical: unsafe as merged — security hole, crash, data loss, broken "
+    "build.\n"
+    "- medium: incomplete or inconsistent change: a caller, handler, or "
+    "reference the diff failed to update, a missed edge case with real "
+    "impact.\n"
+    "- low: an inconsistency with project conventions introduced by this "
+    "diff, with no functional impact.\n"
+    "- Do not inflate severity; drop anything the diff did not cause.\n\n"
+    "Output format — exactly one JSON block:\n"
     "```json\n"
     "{\n"
+    '  "summary": "one or two sentences: what this change does and whether it '
+    'is safe",\n'
     '  "critical": [\n'
-    '    {"title": "brief summary", "detail": "concise explanation", '
-    '"fix": "concrete fix"}\n'
+    '    {"title": "brief summary", "file": "path/to/file", "line": 12, '
+    '"anchor": "exact added or removed line", "impact": "why this change '
+    'breaks X", "detail": "concise explanation", "fix": "concrete fix"}\n'
     "  ],\n"
-    '  "medium": [...],\n'
-    '  "low": [...],\n'
-    '  "verdict": "Approve" | "Request changes"\n'
+    '  "medium": [],\n'
+    '  "low": [],\n'
+    '  "verdict": "Approve"\n'
     "}\n"
     "```\n\n"
     "Rules:\n"
-    "- Empty sections → empty arrays []. Omit sections with no findings.\n"
-    "- title: one-line summary of the issue.\n"
-    "- detail: concise explanation of the risk.\n"
-    "- fix: concrete, actionable fix.\n"
-    "- verdict: consistent with findings. Critical issues → "
-    "Request changes.\n\n"
-    "Judge correctness, security, maintainability, policy compliance, and "
-    "consistency. For each finding explain the risk concisely with a "
-    "concrete fix.\n"
-    "What to look for:\n"
-    "- Bugs, security holes, crashes → Critical.\n"
-    "- Logic problems, missing edge cases, silent breakage → Critical or "
-    "Medium depending on blast radius.\n"
-    "- Incomplete changes: are all related files updated? Deleted files "
-    "cleaned up? Handlers, variables, callers, cross-file references "
-    "in sync? → Medium.\n"
-    "- Idempotency and safety → Medium.\n"
-    "- Dry-run and error behaviour → Medium.\n"
-    "- Policy compliance: ensure every change obeys the project policy "
-    "file (``AGENTS.md``) from the base commit. Flag any violation → "
-    "Critical if it breaks a hard rule, Medium otherwise.\n"
-    "- Consistency with existing patterns → Low.\n"
-    "- Secrets audit: classify as [TRUE POSITIVE] or [FALSE POSITIVE].\n"
-    "- Stale references to deleted/renamed symbols → Medium."
+    "- `summary` is mandatory, even for an approval: name the files or the "
+    "behavior that changed.\n"
+    "- Omit empty sections or use empty arrays.\n"
+    '- `verdict` is "Request changes" when any critical or medium finding '
+    'exists, otherwise "Approve".\n'
 )
 
 
