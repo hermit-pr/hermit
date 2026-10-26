@@ -67,7 +67,20 @@ jobs:
       - name: Extract release notes from CHANGELOG
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          awk "/^## \\[${VERSION}\\]/,/^## \\[/" CHANGELOG.md | sed '$d' > release-notes.md
+          # A range pattern also matches the version heading itself, so the
+          # previous `awk ...,/^## \[/ | sed '$d'` deleted the only line it
+          # produced and every release shipped with an empty body.
+          awk -v heading="## [${VERSION}]" '
+            index($0, heading) == 1 { found = 1 }
+            found && /^## \[/ && index($0, heading) != 1 { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::no CHANGELOG section for version ${VERSION}"
+            exit 1
+          fi
+          echo "release notes:"
+          cat release-notes.md
       - uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes.md
