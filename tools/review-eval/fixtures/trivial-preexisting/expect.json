@@ -1,0 +1,9 @@
+{
+  "title": "Tidy up the greeting",
+  "verdict": "Approve",
+  "max_findings": 0,
+  "must_mention_any": [
+    "greet",
+    "hello"
+  ]
+}
