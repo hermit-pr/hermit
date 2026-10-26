@@ -64,6 +64,32 @@ This replicates the `build` job in `.github/workflows/docker-build.yml`. The ima
 - flake8 uses `.flake8` (its 7.x cannot read `pyproject.toml`); black/isort/pylint config lives in `pyproject.toml`.
 - Line length 88 for Python; shell scripts use 2-space indentation (`shfmt -i 2`).
 
+## Local dev secrets
+
+Developer credentials (for example a fine-grained GitLab PAT used by `opencode`
+to read/post issue comments and open MRs) live in the gitignored `.env` file at
+the repo root — never in the tree.
+
+- `.env` is listed in both `.gitignore` and `.dockerignore`, so it is neither
+  committed nor sent to the Docker build context. Verify with
+  `git check-ignore -v .env` **before** writing a token into it.
+- Format: `KEY=value`, one entry per line, no quotes. Example keys:
+  `GITLAB_HOST=gitlab.example.com` and `GITLAB_TOKEN=glpat-...` — `glab` reads
+  the PAT from `GITLAB_TOKEN`.
+- `_SettingsBase` also loads `.env` (`env_file=".env"`, `extra="ignore"`), so
+  `HERMIT_*` entries there configure the bot for local runs.
+- Load it per shell with `set -a; . ./.env; set +a`; keep the file `600`.
+- Minimal fine-grained PAT permissions for the dev workflow: `Project: Read`,
+  `Work Item: Read/Create` (issues and their notes), `Merge Request: Read/Create`
+  (open MRs and comment on them). Add `Pipeline: Read` or `User: Read` only if
+  you need pipeline status or `glab` identity calls. `git push`/`pull` go over
+  SSH and need no PAT permission.
+- Never `git add -f` it, never paste a token into `values.yaml`, docs, tests,
+  commit messages or chat. A leaked token is revoked and rotated immediately —
+  Secret Detection fails the pipeline if one is ever pushed.
+- The dev PAT is a *user* credential for local tooling only: it is not the bot's
+  `HERMIT_GITLAB_TOKEN` and must not be wired into a reviewer pod.
+
 ## CI constraints
 
 - GitLab CI only. Every push runs **Secret Detection** (enabled) + SAST, plus a single `check` job (lint, test, shellcheck, shfmt, helm lint). Never commit real tokens/keys; scraped secrets fail the pipeline. Chart `secrets` values must stay empty in the repo.
