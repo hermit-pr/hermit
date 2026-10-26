@@ -104,6 +104,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The vLLM provider is the only usable provider, and the bundled native
   OpenAI-compatible package is used so no npm package is fetched.
 
+### Dependencies
+
+- Raise the runtime floors to the versions that are actually exercised:
+  `fastapi>=0.162`, `uvicorn[standard]>=0.54`, `pydantic-settings>=2.16`,
+  `httpx>=0.28`, `kubernetes>=37`. They were already resolved at build time
+  (`pip install .` has no lock), but the declared floors now match what was
+  tested instead of lagging several releases behind.
+- Pin the development tool floors (`black>=26.10.1`, `isort>=9.0`,
+  `flake8>=7.4`, `pylint>=4.1`, `pytest>=9.1`, `pytest-asyncio>=1.4`);
+  `black 26.10.1` also carries the fix for GHSA-cg8m-r9f2-5wm2.
+- Move the GitHub Actions to their current majors (`checkout@v7`,
+  `setup-buildx-action@v4`, `login-action@v4`, `metadata-action@v6`,
+  `build-push-action@v7`, `setup-helm@v5`, `action-gh-release@v3`; all Node 24)
+  and Helm to 4.3.1, both in the release workflow and in the local lint
+  commands. The chart lints and templates unchanged under Helm 4.
+- Add `workflow_dispatch` to the image workflow so a workflow change can be
+  run manually after merge without pushing a branch.
+
 ### Upgrade notes
 
 - Bump the init image if you override it: `config.opencodeInitImage` must point

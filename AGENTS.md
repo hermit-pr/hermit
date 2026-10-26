@@ -22,8 +22,8 @@ All dev tooling runs from a `venv` + `pip install -e '.[dev]'`.
 - Tests: `pytest -v`
 - Image: `docker build -f docker/Dockerfile -t hermit .`
 - Chart (run in the CI image so the local `helm` doesn't need installing):
-  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:3.21.1 lint helm/hermit`
-  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:3.21.1 template hermit helm/hermit`
+  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:4.3.1 lint helm/hermit`
+  - `docker run --rm -v "$PWD:/workspace" -w /workspace alpine/helm:4.3.1 template hermit helm/hermit`
 - Diagrams (requires `graphviz`): `dot -Tpng docs/architecture.dot -o docs/architecture.png && dot -Tpng docs/readme-arch.dot -o docs/readme-arch.png`
 
 ## Pre-commit verification
