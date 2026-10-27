@@ -80,14 +80,23 @@ def _normalize(text: str) -> str:
 
 
 def anchor_matches(anchor: str, lines: list[str]) -> bool:
-    """Return ``True`` when *anchor* quotes one of the changed *lines*."""
+    """Return ``True`` when *anchor* quotes one of the changed *lines*.
+
+    Models often copy a line together with its diff marker (``+``/``-``), so
+    both the raw anchor and its marker-stripped form are tried.
+    """
     needle = anchor.strip().strip("`").strip()
     if not needle or len(needle) > MAX_ANCHOR_CHARS:
         return False
-    normalized = _normalize(needle)
+    candidates = [needle]
+    if needle[:1] in ("+", "-") and needle[1:].strip():
+        candidates.append(needle[1:].strip())
+    normalized = [_normalize(candidate) for candidate in candidates]
     for line in lines:
-        if needle in line or normalized in _normalize(line):
-            return True
+        normalized_line = _normalize(line)
+        for candidate, candidate_normalized in zip(candidates, normalized):
+            if candidate in line or candidate_normalized in normalized_line:
+                return True
     return False
 
 
