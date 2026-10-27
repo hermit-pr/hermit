@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-10-27
 
 ### Fixed
 
@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v0.3.3, v0.3.4 and v0.4.0 all shipped without notes). Extraction now stops
   at the next `## [` heading without matching the start line, and the job fails
   if the section is missing instead of publishing an empty release.
+- **Cross-file impact is no longer silently approved.** The 0.4.0 prompt
+  presented the injected diff as "the only source of truth", which compact
+  models read as "the repository stops at the diff": on a rename whose second
+  caller lives in a file the diff does not touch, they returned `Approve` with
+  zero tool calls instead of running `grep`. The rules now state that the diff
+  describes what changed, not what exists, that the checkout holds the whole
+  repository, that one `grep` per removed or renamed name is mandatory, and
+  that an approval asserts nothing outside the diff still uses the old name.
+  The "at most 5 tool calls, then answer" budget, which acted as permission to
+  skip verification, is gone. See
+  [#10](https://gitlab.com/hermit-bot/hermit/-/work_items/10).
+- **Anchors copied with their diff marker are accepted.** A model that quotes
+  `-def parse_config(path):` instead of `def parse_config(path):` had its
+  finding dropped as out-of-scope, turning a correct cross-file report into a
+  failed review. The marker is now stripped before the anchor is matched.
 
 ## [0.4.0] - 2026-10-26
 

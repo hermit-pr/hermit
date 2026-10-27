@@ -68,6 +68,14 @@ def test_anchor_matches_tolerates_whitespace() -> None:
     assert not anchor_matches("", lines)
 
 
+def test_anchor_matches_tolerates_diff_markers() -> None:
+    """A line copied with its + or - diff marker still matches."""
+    lines = changed_lines(DIFF)
+    assert anchor_matches("-def parse_config(path):", lines)
+    assert anchor_matches("+def load_config(path):", lines)
+    assert not anchor_matches("-def dropped_function(path):", lines)
+
+
 def test_anchor_rejects_file_headers() -> None:
     """An anchor quoting a path header is out of scope."""
     assert not anchor_matches("b/parse.py", changed_lines(DIFF))
