@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **GitHub releases no longer publish an empty description.** The release job
+  extracted the changelog section with `awk "/^## \[${VERSION}\]/,/^## \[/"`,
+  whose range also matches the version heading itself; the pipeline then
+  deleted that single line, so `release-notes.md` was always empty (v0.3.2,
+  v0.3.3, v0.3.4 and v0.4.0 all shipped without notes). Extraction now stops
+  at the next `## [` heading without matching the start line, and the job fails
+  if the section is missing instead of publishing an empty release.
+
 ## [0.4.0] - 2026-10-26
 
 ### Changed (breaking)
