@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A review is judged, not just summarised.** The 0.4.x rules had dropped the
+  positive evaluation checklist and kept only the rename `grep`, so a compact
+  model answered a bare `Approve` with no finding on any diff that did not
+  rename a symbol — a config change that moved a ~31B-parameter model onto one
+  94GB accelerator with a 256k context was approved while an independent
+  reviewer raised it as an out-of-memory bug. `DEFAULT_REVIEW_RULES` now opens
+  with a mandatory judgement step (correctness, resource feasibility with the
+  bytes-per-parameter and KV-cache arithmetic, internal consistency, security
+  posture, secret classification, completeness, policy compliance) and an
+  approval gate: `Approve` asserts that every added, removed, and changed line
+  was inspected. See
+  [#11](https://gitlab.com/hermit-bot/hermit/-/work_items/11).
+- **The extracted policy file is no longer part of the checkout.** The policy
+  was written to `.hermit-policy.md` *inside* the clone; the rename `grep` the
+  reviewer runs over that clone matched it, so hermit's own copy of the
+  base-commit `AGENTS.md` was reported as a stale reference — one false `medium`
+  finding per mention, and a false `Request changes`. The copy now lives in the
+  workspace, outside the checkout; its text is quoted directly in the review
+  prompt (capped at 16 KiB) instead of being read back from a file; and
+  `parse_verdict` drops any finding that still names it.
+- **The evaluation harness replays the policy path.** `tools/review-eval` gains
+  a `policy-extraction` fixture: a fixture can declare a `policy` file, which
+  the harness extracts from the base commit into the workspace exactly as
+  `hermit.slave` does, and `must_not_mention` asserts that the scratch copy
+  never reaches the published review. The previous fixture set never exercised
+  the production policy injection, so the regression could not be caught.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed

@@ -67,6 +67,26 @@ def test_settings_default_review_rules_define_sections() -> None:
     assert '"verdict"' in DEFAULT_REVIEW_RULES
 
 
+def test_settings_default_review_rules_demand_judgement() -> None:
+    """The rules ask for a judgement before an approval, not a summary.
+
+    A scope-limiting-only prompt let compact models answer a bare "Approve"
+    without inspecting the added lines (work item #11).
+    """
+    assert "STEP 1 — judge the change" in DEFAULT_REVIEW_RULES
+    assert "Resource feasibility" in DEFAULT_REVIEW_RULES
+    assert "Internal consistency" in DEFAULT_REVIEW_RULES
+    assert "Security posture" in DEFAULT_REVIEW_RULES
+    assert "Approval gate" in DEFAULT_REVIEW_RULES
+    assert "did not inspect is wrong" in DEFAULT_REVIEW_RULES
+
+
+def test_settings_default_review_rules_keep_hermit_scratch_out_of_scope() -> None:
+    """The quoted policy copy is never a finding, a stale hit, or a grep target."""
+    assert "target branch's policy file" in DEFAULT_REVIEW_RULES
+    assert "never grep it" in DEFAULT_REVIEW_RULES
+
+
 def test_settings_review_rules_defaults_to_empty() -> None:
     """Without explicit rules the bot uses its hardcoded default in the prompt."""
     assert make_settings().review_rules == ""

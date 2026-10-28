@@ -129,6 +129,52 @@ def test_parse_verdict_drops_non_object_findings() -> None:
     assert review.dropped == 1
 
 
+def test_parse_verdict_drops_findings_on_hermit_scratch_paths() -> None:
+    """A finding naming the extracted policy copy is never published.
+
+    The copy is hermit-owned scratch data holding the base-commit text, so it
+    can always be reported as a stale reference; it is dropped even when the
+    anchor quotes a real changed line.
+    """
+    review = parse_verdict(
+        _payload(
+            medium=[
+                _finding(
+                    title="policy still mentions parse_config",
+                    file="/workspace/.hermit-policy.md",
+                )
+            ]
+        ),
+        DIFF,
+        ignored_paths=("/workspace/.hermit-policy.md",),
+    )
+    assert not review.findings
+    assert review.dropped == 1
+    assert review.verdict == APPROVE
+
+
+def test_parse_verdict_drops_basename_matches_on_scratch_paths() -> None:
+    """A model echoing the bare scratch file name is filtered too."""
+    review = parse_verdict(
+        _payload(medium=[_finding(file=".hermit-policy.md")]),
+        DIFF,
+        ignored_paths=("/workspace/.hermit-policy.md",),
+    )
+    assert not review.findings
+    assert review.dropped == 1
+
+
+def test_parse_verdict_keeps_findings_on_repository_files() -> None:
+    """Only hermit-injected paths are filtered, never repository files."""
+    review = parse_verdict(
+        _payload(medium=[_finding(file="worker.py")]),
+        DIFF,
+        ignored_paths=("/workspace/.hermit-policy.md",),
+    )
+    assert len(review.findings) == 1
+    assert review.dropped == 0
+
+
 def test_parse_verdict_rejects_request_changes_without_findings() -> None:
     """Ask for changes without an anchored finding is a failed review."""
     with pytest.raises(VerdictError, match="no finding is anchored"):

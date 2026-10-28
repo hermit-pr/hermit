@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from hermit.config import DEFAULT_REVIEW_RULES
+from hermit.git import extract_policy
 from hermit.opencode import (
     AGENT_NAME,
     TOOL_OUTPUT_MAX_BYTES,
@@ -31,6 +32,8 @@ from hermit.prompt import build_review_prompt
 from hermit.verdict import VerdictError, parse_verdict, render_markdown
 
 DEFAULT_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+#: Policy copy location, mirroring ``hermit.slave``: outside the checkout.
+POLICY_EXTRACT_NAME = ".hermit-policy.md"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -176,7 +179,13 @@ def _run(
 def evaluate(
     fixture: Path, opencode: str, model: str, steps: int, timeout: int
 ) -> dict:
-    """Run one fixture and return its result record."""
+    """Run one fixture and return its result record.
+
+    A fixture whose ``expect.json`` declares a ``policy`` file replays the
+    production policy path: the file is extracted from the base commit into the
+    workspace (never into the checkout) and quoted in the prompt, and findings
+    naming that copy are dropped exactly as ``hermit.slave`` does.
+    """
     expect = json.loads((fixture / "expect.json").read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
@@ -184,11 +193,20 @@ def evaluate(
         workspace = workdir / "workspace"
         workspace.mkdir()
         diff, stat = _build_repo(fixture, workdir)
+        policy_path = workspace / POLICY_EXTRACT_NAME
+        policy_content = ""
+        policy_file = expect.get("policy", "AGENTS.md")
+        if expect.get("policy"):
+            policy_content = extract_policy(
+                str(repo), "target-branch", str(policy_path), policy_file
+            )
         prompt = build_review_prompt(
             "gitlab",
             f"eval/{fixture.name}",
             "1",
             pr_title=expect.get("title", fixture.name),
+            policy_file=policy_file,
+            policy_content=policy_content,
             diff=diff,
             diff_stat=stat,
         )
@@ -207,12 +225,13 @@ def evaluate(
         "tool_calls": tool_calls,
     }
     try:
-        review = parse_verdict(output, diff)
+        review = parse_verdict(output, diff, ignored_paths=(str(policy_path),))
     except VerdictError as exc:
         record.update({"status": "FAIL", "error": str(exc), "findings": 0})
         return record
     rendered = render_markdown(review)
     mentions = [m.lower() for m in expect.get("must_mention_any", [])]
+    forbidden = [m.lower() for m in expect.get("must_not_mention", [])]
     record.update(
         {
             "verdict": review.verdict,
@@ -221,6 +240,7 @@ def evaluate(
             "summary": review.summary,
             "mentions_expected": not mentions
             or any(m in rendered.lower() for m in mentions),
+            "mentions_forbidden": any(m in rendered.lower() for m in forbidden),
             "markdown": rendered,
         }
     )
@@ -228,6 +248,7 @@ def evaluate(
         review.verdict == expect["verdict"],
         len(review.findings) <= expect.get("max_findings", 99),
         record["mentions_expected"],
+        not record["mentions_forbidden"],
     ]
     record["status"] = "PASS" if all(checks) else "FAIL"
     return record

@@ -1,0 +1,12 @@
+{
+  "title": "Rename parse_config to load_config",
+  "verdict": "Request changes",
+  "max_findings": 2,
+  "must_mention_any": [
+    "worker"
+  ],
+  "must_not_mention": [
+    ".hermit-policy"
+  ],
+  "policy": "AGENTS.md"
+}
