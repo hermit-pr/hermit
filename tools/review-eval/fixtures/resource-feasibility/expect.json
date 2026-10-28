@@ -1,0 +1,12 @@
+{
+  "title": "Scale the 32B model down to a single GPU",
+  "verdict": "Request changes",
+  "max_findings": 3,
+  "must_mention_any": [
+    "memory",
+    "oom",
+    "kv",
+    "vram",
+    "94"
+  ]
+}

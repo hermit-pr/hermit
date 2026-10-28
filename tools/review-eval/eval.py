@@ -29,6 +29,7 @@ from hermit.opencode import (
     permission_rules,
 )
 from hermit.prompt import build_review_prompt
+from hermit.references import stale_references
 from hermit.verdict import VerdictError, parse_verdict, render_markdown
 
 DEFAULT_FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -200,6 +201,7 @@ def evaluate(
             policy_content = extract_policy(
                 str(repo), "target-branch", str(policy_path), policy_file
             )
+        references = stale_references(diff, str(repo), policy_file=policy_file)
         prompt = build_review_prompt(
             "gitlab",
             f"eval/{fixture.name}",
@@ -207,6 +209,7 @@ def evaluate(
             pr_title=expect.get("title", fixture.name),
             policy_file=policy_file,
             policy_content=policy_content,
+            stale_references=references,
             diff=diff,
             diff_stat=stat,
         )

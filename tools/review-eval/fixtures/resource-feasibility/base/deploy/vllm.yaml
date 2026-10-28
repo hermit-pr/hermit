@@ -1,0 +1,6 @@
+model: Qwen3-32B
+tensorParallelSize: 4
+maxModelLen: 32768
+resources:
+  gpus: 4
+  gpuMemoryGB: 94

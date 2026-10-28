@@ -35,6 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hermit.slave` does, and `must_not_mention` asserts that the scratch copy
   never reaches the published review. The previous fixture set never exercised
   the production policy injection, so the regression could not be caught.
+- **Cross-file impact is computed by hermit, not trusted to the model.** The
+  rename `grep` was model-driven, and a compact model either skipped it,
+  approved, or flagged the file the diff had already updated — never the caller
+  left behind. `hermit.references` now computes the candidates itself: it
+  extracts the declared/imported names the diff removes (dropping names an
+  added line restores, short names, and names with too many hits to be a rename),
+  runs `git grep -w` over the post-change checkout, ignores comment lines and
+  the policy copy, and quotes each leftover in the prompt with the exact removed
+  diff line to use as the finding anchor. The model turns a verified fact into a
+  finding instead of searching.
+- **The rules no longer let a model invent a removal.** A diff that added a
+  table row while editing another was reported as "the PR replaces X by Y",
+  with a stale-reference finding anchored on an untouched line. The rules now
+  require the diff's own removed lines (`-`) before calling anything replaced
+  or stale, and the eval harness gains `addition-not-replacement` (a pure
+  addition must be approved without a "replaces" claim) plus
+  `resource-feasibility` (a ~32B model moved to a single 94GB GPU at 256k
+  context, contradicting its own docs), so the judgement fix is locked by a
+  regression fixture instead of relying on the model.
 
 ## [0.4.1] - 2026-10-27
 

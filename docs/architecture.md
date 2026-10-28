@@ -66,7 +66,11 @@ External systems:
       policy file (`HERMIT_POLICY_FILE_PATH`) is extracted from the base commit
       and quoted in the same prompt (fenced and capped at 16 KiB) instead of
       being written inside the clone, so the reviewer's rename `grep` can never
-      match hermit's own copy. The generated
+      match hermit's own copy. For every name the diff removes or renames,
+      `hermit.references` scans the post-change checkout and quotes the leftover
+      references in the prompt as verified data, with the exact removed diff
+      line to use as the finding anchor: cross-file impact no longer depends on
+      the model running the `grep` itself. The generated
       OpenCode 2 configuration pins the provider (`policies`), allows only
       read-only discovery plus an inspection-only shell allowlist, and bounds
       the run with a `steps` budget (`HERMIT_REVIEW_MAX_STEPS`); every run uses
@@ -120,6 +124,13 @@ slave checks it against the injected diff and drops findings that quote nothing
 in it, so findings about untouched code cannot reach the PR/MR. Cross-file
 impact is still reported — the anchor is the changed line, while `file`/`impact`
 name what it breaks elsewhere.
+
+The slave does not rely on the model to find those leftovers: for every name the
+diff removes or renames, it scans the post-change checkout (`git grep`, comments,
+the policy copy and hermit scratch files excluded, common words skipped) and
+quotes each remaining reference in the prompt with the removed diff line to use
+as the anchor. The model turns a verified fact into a finding instead of
+performing the search.
 
 An approval is a verdict, not a default: the rules require the reviewer to judge
 every added, removed, and changed line against an explicit checklist

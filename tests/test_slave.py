@@ -20,6 +20,7 @@ from hermit.git import (
     fetch_refs,
 )
 from hermit.prompt import build_review_prompt
+from hermit.references import StaleReference
 from hermit.report import report_review
 from hermit.slave import run_review
 from hermit.verdict import VerdictError
@@ -160,6 +161,34 @@ def test_build_review_prompt_without_policy_has_no_policy_block() -> None:
     assert "BEGIN PROJECT POLICY" not in prompt
 
 
+def test_build_review_prompt_quotes_verified_stale_references() -> None:
+    """Hermit-computed leftovers are quoted with the anchor to reuse."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        stale_references=[
+            StaleReference(
+                name="parse_config",
+                anchor="def load_config(path):",
+                file="worker.py",
+                line=3,
+                text="from config import parse_config",
+            )
+        ],
+    )
+    assert "BEGIN VERIFIED STALE REFERENCES" in prompt
+    assert "`parse_config`: worker.py:3" in prompt
+    assert "anchor: `def load_config(path):`" in prompt
+    assert "Do not grep these names again" in prompt
+
+
+def test_build_review_prompt_without_references_has_no_stale_block() -> None:
+    """A diff that removes no name gets no stale-reference fence."""
+    prompt = build_review_prompt("github", "acme/app", "42")
+    assert "VERIFIED STALE REFERENCES" not in prompt
+
+
 def test_build_review_prompt_truncates_oversized_policy() -> None:
     """An oversized policy is capped and the truncation is announced."""
     policy = "".join(f"- rule {index}\n" for index in range(2000))
@@ -263,6 +292,18 @@ async def test_review_includes_header(
     monkeypatch.setattr(
         "hermit.slave.extract_policy", lambda *a, **k: "# project rules\n"
     )
+    monkeypatch.setattr(
+        "hermit.slave.stale_references",
+        lambda *a, **k: [
+            StaleReference(
+                name="parse_config",
+                anchor="def load_config(path):",
+                file="worker.py",
+                line=3,
+                text="from config import parse_config",
+            )
+        ],
+    )
     runners: list[_FakeRunner] = []
 
     def fake_runner(*_args, **kwargs) -> _FakeRunner:
@@ -283,6 +324,8 @@ async def test_review_includes_header(
     assert "+line" in runners[0].prompt
     assert "file.txt | 1 +" in runners[0].prompt
     assert "# project rules" in runners[0].prompt
+    assert "VERIFIED STALE REFERENCES" in runners[0].prompt
+    assert "worker.py:3" in runners[0].prompt
 
 
 @pytest.mark.asyncio
@@ -308,6 +351,7 @@ async def test_review_extracts_the_policy_outside_the_checkout(
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
     monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
     monkeypatch.setattr("hermit.slave.extract_policy", fake_extract)
+    monkeypatch.setattr("hermit.slave.stale_references", lambda *a, **k: [])
     monkeypatch.setattr(
         "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner(_verdict())
     )
@@ -332,6 +376,7 @@ async def test_review_fails_without_structured_verdict(
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
     monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
     monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: "")
+    monkeypatch.setattr("hermit.slave.stale_references", lambda *a, **k: [])
     monkeypatch.setattr(
         "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("Approve")
     )

@@ -22,6 +22,7 @@ from hermit.git import (
 from hermit.logging_config import configure_logging
 from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
+from hermit.references import stale_references
 from hermit.report import report_failure, report_review
 from hermit.secretscan import scan_for_secrets
 from hermit.verdict import parse_verdict, render_markdown
@@ -119,6 +120,13 @@ async def run_review(settings: SlaveSettings) -> str:
     diff, stat, policy_path, policy_text, repo_dir = await _prepare_repository(
         settings, workspace
     )
+    references = await asyncio.to_thread(
+        stale_references,
+        diff,
+        repo_dir,
+        policy_file=settings.policy_file_path,
+    )
+    logger.info("%d verified stale reference(s) computed", len(references))
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
@@ -128,6 +136,7 @@ async def run_review(settings: SlaveSettings) -> str:
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
         policy_content=policy_text,
+        stale_references=references,
         diff=diff,
         diff_stat=stat,
         max_diff_bytes=settings.max_prompt_diff_bytes,
