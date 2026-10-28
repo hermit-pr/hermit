@@ -20,6 +20,7 @@ from hermit.git import (
     fetch_refs,
 )
 from hermit.prompt import build_review_prompt
+from hermit.references import StaleReference
 from hermit.report import report_review
 from hermit.slave import run_review
 from hermit.verdict import VerdictError
@@ -138,6 +139,70 @@ def test_build_review_prompt_includes_secret_candidates() -> None:
     assert "TRUE POSITIVE" in prompt
 
 
+def test_build_review_prompt_quotes_the_policy_inline() -> None:
+    """The base-commit policy is quoted, never pointed at inside the checkout."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        policy_file="AGENTS.md",
+        policy_content="- use `parse_config` for every config read\n",
+    )
+    assert "BEGIN PROJECT POLICY" in prompt
+    assert "use `parse_config` for every config read" in prompt
+    assert "END PROJECT POLICY" in prompt
+    assert ".hermit-policy.md" not in prompt
+    assert "extracted from the *base* commit" in prompt
+
+
+def test_build_review_prompt_without_policy_has_no_policy_block() -> None:
+    """A repository with no policy file gets no empty policy fence."""
+    prompt = build_review_prompt("github", "acme/app", "42", policy_content="")
+    assert "BEGIN PROJECT POLICY" not in prompt
+
+
+def test_build_review_prompt_quotes_verified_stale_references() -> None:
+    """Hermit-computed leftovers are quoted with the anchor to reuse."""
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        stale_references=[
+            StaleReference(
+                name="parse_config",
+                anchor="def load_config(path):",
+                file="worker.py",
+                line=3,
+                text="from config import parse_config",
+            )
+        ],
+    )
+    assert "BEGIN VERIFIED STALE REFERENCES" in prompt
+    assert "`parse_config`: worker.py:3" in prompt
+    assert "anchor: `def load_config(path):`" in prompt
+    assert "Do not grep these names again" in prompt
+
+
+def test_build_review_prompt_without_references_has_no_stale_block() -> None:
+    """A diff that removes no name gets no stale-reference fence."""
+    prompt = build_review_prompt("github", "acme/app", "42")
+    assert "VERIFIED STALE REFERENCES" not in prompt
+
+
+def test_build_review_prompt_truncates_oversized_policy() -> None:
+    """An oversized policy is capped and the truncation is announced."""
+    policy = "".join(f"- rule {index}\n" for index in range(2000))
+    prompt = build_review_prompt(
+        "github",
+        "acme/app",
+        "42",
+        policy_content=policy,
+    )
+    assert "- rule 0" in prompt
+    assert "- rule 1999" not in prompt
+    assert "policy truncated" in prompt
+
+
 async def test_report_review_posts_to_master() -> None:
     """The slave POSTs the review to the master report endpoint."""
     received: dict = {}
@@ -224,7 +289,21 @@ async def test_review_includes_header(
 
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
     monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
-    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "hermit.slave.extract_policy", lambda *a, **k: "# project rules\n"
+    )
+    monkeypatch.setattr(
+        "hermit.slave.stale_references",
+        lambda *a, **k: [
+            StaleReference(
+                name="parse_config",
+                anchor="def load_config(path):",
+                file="worker.py",
+                line=3,
+                text="from config import parse_config",
+            )
+        ],
+    )
     runners: list[_FakeRunner] = []
 
     def fake_runner(*_args, **kwargs) -> _FakeRunner:
@@ -244,6 +323,43 @@ async def test_review_includes_header(
     assert runners[0].kwargs["max_steps"] == 12
     assert "+line" in runners[0].prompt
     assert "file.txt | 1 +" in runners[0].prompt
+    assert "# project rules" in runners[0].prompt
+    assert "VERIFIED STALE REFERENCES" in runners[0].prompt
+    assert "worker.py:3" in runners[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_review_extracts_the_policy_outside_the_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The policy copy lives in the workspace, never in the clone.
+
+    A copy inside the checkout would be matched by the reviewer's rename
+    ``grep`` and reported as a stale reference.
+    """
+    captured: dict = {}
+
+    async def fake_report(*_args) -> None:
+        """Ignore the report."""
+
+    def fake_extract(*args, **_kwargs) -> str:
+        """Record where the policy copy is written."""
+        captured["repo_dir"] = args[0]
+        captured["destination"] = args[2]
+        return "# project rules\n"
+
+    monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
+    monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
+    monkeypatch.setattr("hermit.slave.extract_policy", fake_extract)
+    monkeypatch.setattr("hermit.slave.stale_references", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner(_verdict())
+    )
+    monkeypatch.setattr("hermit.slave.report_review", fake_report)
+    await run_review(_slave_settings(tmp_path))
+    destination = Path(captured["destination"])
+    assert destination.parent == tmp_path
+    assert Path(captured["repo_dir"]) not in destination.parents
 
 
 @pytest.mark.asyncio
@@ -259,7 +375,8 @@ async def test_review_fails_without_structured_verdict(
 
     monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
     monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
-    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: False)
+    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: "")
+    monkeypatch.setattr("hermit.slave.stale_references", lambda *a, **k: [])
     monkeypatch.setattr(
         "hermit.slave.OpenCodeRunner", lambda *a, **k: _FakeRunner("Approve")
     )
@@ -445,7 +562,7 @@ def test_clone_and_diff_uses_current_target_branch() -> None:
     shutil.which("git") is None, reason="git is not installed on this host"
 )
 def test_extract_policy_reads_file_from_base_commit() -> None:
-    """The policy file is extracted from the base commit."""
+    """The policy file is extracted from the base commit and returned."""
     with tempfile.TemporaryDirectory() as tmp:
         origin = Path(tmp) / "origin"
         _run_git(["git", "init", "-b", "main", str(origin)])
@@ -458,15 +575,15 @@ def test_extract_policy_reads_file_from_base_commit() -> None:
 
         destination = Path(tmp) / "policy.md"
         got = extract_policy(str(origin), base_sha, str(destination))
-        assert got is True
+        assert got == "# project rules\n"
         assert destination.read_text(encoding="utf-8") == "# project rules\n"
 
 
 @pytest.mark.skipif(
     shutil.which("git") is None, reason="git is not installed on this host"
 )
-def test_extract_policy_returns_false_when_absent() -> None:
-    """A missing policy file is reported as not found."""
+def test_extract_policy_returns_empty_when_absent() -> None:
+    """A missing policy file yields an empty string and writes nothing."""
     with tempfile.TemporaryDirectory() as tmp:
         origin = Path(tmp) / "origin"
         _run_git(["git", "init", "-b", "main", str(origin)])
@@ -479,7 +596,7 @@ def test_extract_policy_returns_false_when_absent() -> None:
 
         destination = Path(tmp) / "policy.md"
         got = extract_policy(str(origin), base_sha, str(destination), "AGENTS.md")
-        assert got is False
+        assert got == ""
         assert not destination.exists()
 
 

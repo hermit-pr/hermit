@@ -62,7 +62,15 @@ External systems:
       review instructions. The computed diff (`git diff target-branch`, capped
       by `HERMIT_MAX_PROMPT_DIFF_BYTES` with an explicit truncation notice) is
       injected into that prompt as the single source of truth, so the reviewer
-      never has to reconstruct the change by walking the tree. The generated
+      never has to reconstruct the change by walking the tree. The project
+      policy file (`HERMIT_POLICY_FILE_PATH`) is extracted from the base commit
+      and quoted in the same prompt (fenced and capped at 16 KiB) instead of
+      being written inside the clone, so the reviewer's rename `grep` can never
+      match hermit's own copy. For every name the diff removes or renames,
+      `hermit.references` scans the post-change checkout and quotes the leftover
+      references in the prompt as verified data, with the exact removed diff
+      line to use as the finding anchor: cross-file impact no longer depends on
+      the model running the `grep` itself. The generated
       OpenCode 2 configuration pins the provider (`policies`), allows only
       read-only discovery plus an inspection-only shell allowlist, and bounds
       the run with a `steps` budget (`HERMIT_REVIEW_MAX_STEPS`); every run uses
@@ -116,6 +124,20 @@ slave checks it against the injected diff and drops findings that quote nothing
 in it, so findings about untouched code cannot reach the PR/MR. Cross-file
 impact is still reported — the anchor is the changed line, while `file`/`impact`
 name what it breaks elsewhere.
+
+The slave does not rely on the model to find those leftovers: for every name the
+diff removes or renames, it scans the post-change checkout (`git grep`, comments,
+the policy copy and hermit scratch files excluded, common words skipped) and
+quotes each remaining reference in the prompt with the removed diff line to use
+as the anchor. The model turns a verified fact into a finding instead of
+performing the search.
+
+An approval is a verdict, not a default: the rules require the reviewer to judge
+every added, removed, and changed line against an explicit checklist
+(correctness, resource feasibility, internal consistency, security posture,
+secret classification, completeness, policy compliance) before it may answer
+`Approve`. Findings naming the extracted policy copy are dropped unconditionally:
+that copy is hermit's scratch data, never repository content.
 
 A review without JSON, without a summary, or asking for changes with no
 anchored finding is a failure: the job fails, the commit status is set to
@@ -241,7 +263,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_MODEL` | yes | passed to reviewer pods |
 | `HERMIT_VLLM_API_KEY` | no | optional API key forwarded to the vLLM endpoint |
 | `HERMIT_REVIEW_RULES` | no | passed to reviewer pods |
-| `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from base commit (default `AGENTS.md`) |
+| `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit and quoted in the review prompt (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | opencode binary path inside pods |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode args |
 | `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:2.1.4`) |
@@ -271,7 +293,7 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_PR_TITLE`, `HERMIT_PR_BODY` | PR/MR title and description fed to the reviewer |
 | `HERMIT_VLLM_ENDPOINT`, `HERMIT_MODEL`, `HERMIT_REVIEW_RULES` | opencode config |
 | `HERMIT_VLLM_API_KEY` | optional API key forwarded to the vLLM endpoint (from the job Secret) |
-| `HERMIT_POLICY_FILE_PATH` | project policy file to extract from the base commit |
+| `HERMIT_POLICY_FILE_PATH` | project policy file to extract from the base commit and quote in the prompt |
 | `HERMIT_OPCODE_BIN`, `HERMIT_OPCODE_ARGS` | opencode invocation |
 | `HERMIT_WORKSPACE` | working directory inside the pod |
 | `HERMIT_MASTER_URL` | where to report the review |

@@ -22,6 +22,7 @@ from hermit.git import (
 from hermit.logging_config import configure_logging
 from hermit.opencode import OpenCodeRunner
 from hermit.prompt import build_review_prompt
+from hermit.references import stale_references
 from hermit.report import report_failure, report_review
 from hermit.secretscan import scan_for_secrets
 from hermit.verdict import parse_verdict, render_markdown
@@ -31,14 +32,20 @@ logger = logging.getLogger(__name__)
 
 async def _prepare_repository(
     settings: SlaveSettings, workspace: str
-) -> tuple[str, str, str, bool, str]:
+) -> tuple[str, str, str, str, str]:
     """Clone the repository, compute the diff and extract the policy file.
 
-    Returns a ``(diff, stat, policy_path, extracted, repo_dir)`` tuple where
-    ``stat`` is the ``git diff --stat`` summary, ``extracted`` is ``True`` when
-    the policy file was found at the base commit and ``repo_dir`` is the
-    directory the repository was cloned into (used as the working directory for
-    opencode).
+    Returns a ``(diff, stat, policy_path, policy_text, repo_dir)`` tuple where
+    ``stat`` is the ``git diff --stat`` summary, ``policy_path`` is where a copy
+    of the policy was written for post-mortem, ``policy_text`` is the policy
+    content quoted in the prompt (empty when the base commit has none) and
+    ``repo_dir`` is the directory the repository was cloned into (used as the
+    working directory for opencode).
+
+    ``policy_path`` deliberately lives in the workspace, **outside** the clone:
+    a policy copy inside the checkout would be matched by the rename ``grep``
+    the reviewer runs, and hermit's own scratch file would be reported as a
+    stale reference.
 
     Raises:
         ValueError: if the computed diff is empty.
@@ -73,28 +80,28 @@ async def _prepare_repository(
         raise ValueError("no diff between base and head")
     logger.info("computed diff of %d bytes", len(diff))
     stat = await asyncio.to_thread(diff_stat, repo_dir)
-    policy_path = os.path.join(repo_dir, ".hermit-policy.md")
+    policy_path = os.path.join(workspace, ".hermit-policy.md")
     if settings.base_sha:
         await asyncio.to_thread(ensure_commit, repo_dir, settings.base_sha, env=env)
     try:
         os.remove(askpass_path)
     except OSError:
         pass
-    extracted = await asyncio.to_thread(
+    policy_text = await asyncio.to_thread(
         extract_policy,
         repo_dir,
         settings.base_sha,
         policy_path,
         settings.policy_file_path,
     )
-    if extracted:
+    if policy_text:
         logger.info("extracted policy file %s", settings.policy_file_path)
     else:
         logger.warning(
             "policy file %s not found at base commit, skipping",
             settings.policy_file_path,
         )
-    return diff, stat, policy_path, extracted, repo_dir
+    return diff, stat, policy_path, policy_text, repo_dir
 
 
 async def run_review(settings: SlaveSettings) -> str:
@@ -110,9 +117,16 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.base_ref,
         settings.head_ref,
     )
-    diff, stat, policy_path, extracted, repo_dir = await _prepare_repository(
+    diff, stat, policy_path, policy_text, repo_dir = await _prepare_repository(
         settings, workspace
     )
+    references = await asyncio.to_thread(
+        stale_references,
+        diff,
+        repo_dir,
+        policy_file=settings.policy_file_path,
+    )
+    logger.info("%d verified stale reference(s) computed", len(references))
     prompt = build_review_prompt(
         settings.git_provider,
         settings.repo,
@@ -121,7 +135,8 @@ async def run_review(settings: SlaveSettings) -> str:
         pr_body=settings.pr_body,
         secret_candidates=scan_for_secrets(diff),
         policy_file=settings.policy_file_path,
-        policy_extract_path=policy_path if extracted else "",
+        policy_content=policy_text,
+        stale_references=references,
         diff=diff,
         diff_stat=stat,
         max_diff_bytes=settings.max_prompt_diff_bytes,
@@ -148,7 +163,7 @@ async def run_review(settings: SlaveSettings) -> str:
     output = await runner.run(prompt)
     logger.info("review produced (%d bytes); reporting to master", len(output))
     logger.info("raw opencode output (%d bytes)\n%s", len(output), output[-4000:])
-    review = parse_verdict(output, diff)
+    review = parse_verdict(output, diff, ignored_paths=(policy_path,))
     output = render_markdown(review)
     logger.info(
         "validated verdict %r with %d finding(s), dropped %d outside the diff",

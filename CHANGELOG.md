@@ -5,6 +5,56 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A review is judged, not just summarised.** The 0.4.x rules had dropped the
+  positive evaluation checklist and kept only the rename `grep`, so a compact
+  model answered a bare `Approve` with no finding on any diff that did not
+  rename a symbol — a config change that moved a ~31B-parameter model onto one
+  94GB accelerator with a 256k context was approved while an independent
+  reviewer raised it as an out-of-memory bug. `DEFAULT_REVIEW_RULES` now opens
+  with a mandatory judgement step (correctness, resource feasibility with the
+  bytes-per-parameter and KV-cache arithmetic, internal consistency, security
+  posture, secret classification, completeness, policy compliance) and an
+  approval gate: `Approve` asserts that every added, removed, and changed line
+  was inspected. See
+  [#11](https://gitlab.com/hermit-bot/hermit/-/work_items/11).
+- **The extracted policy file is no longer part of the checkout.** The policy
+  was written to `.hermit-policy.md` *inside* the clone; the rename `grep` the
+  reviewer runs over that clone matched it, so hermit's own copy of the
+  base-commit `AGENTS.md` was reported as a stale reference — one false `medium`
+  finding per mention, and a false `Request changes`. The copy now lives in the
+  workspace, outside the checkout; its text is quoted directly in the review
+  prompt (capped at 16 KiB) instead of being read back from a file; and
+  `parse_verdict` drops any finding that still names it.
+- **The evaluation harness replays the policy path.** `tools/review-eval` gains
+  a `policy-extraction` fixture: a fixture can declare a `policy` file, which
+  the harness extracts from the base commit into the workspace exactly as
+  `hermit.slave` does, and `must_not_mention` asserts that the scratch copy
+  never reaches the published review. The previous fixture set never exercised
+  the production policy injection, so the regression could not be caught.
+- **Cross-file impact is computed by hermit, not trusted to the model.** The
+  rename `grep` was model-driven, and a compact model either skipped it,
+  approved, or flagged the file the diff had already updated — never the caller
+  left behind. `hermit.references` now computes the candidates itself: it
+  extracts the declared/imported names the diff removes (dropping names an
+  added line restores, short names, and names with too many hits to be a rename),
+  runs `git grep -w` over the post-change checkout, ignores comment lines and
+  the policy copy, and quotes each leftover in the prompt with the exact removed
+  diff line to use as the finding anchor. The model turns a verified fact into a
+  finding instead of searching.
+- **The rules no longer let a model invent a removal.** A diff that added a
+  table row while editing another was reported as "the PR replaces X by Y",
+  with a stale-reference finding anchored on an untouched line. The rules now
+  require the diff's own removed lines (`-`) before calling anything replaced
+  or stale, and the eval harness gains `addition-not-replacement` (a pure
+  addition must be approved without a "replaces" claim) plus
+  `resource-feasibility` (a ~32B model moved to a single 94GB GPU at 256k
+  context, contradicting its own docs), so the judgement fix is locked by a
+  regression fixture instead of relying on the model.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed

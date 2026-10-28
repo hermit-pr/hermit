@@ -279,15 +279,22 @@ def ensure_commit(
 
 def extract_policy(
     repo_dir: str, base: str, destination: str, policy_file: str = "AGENTS.md"
-) -> bool:
-    """Extract ``policy_file`` from ``base`` into ``destination``.
+) -> str:
+    """Extract ``policy_file`` from ``base`` and return its text.
+
+    The text is returned so the caller can quote it in the review prompt, and a
+    copy is written to ``destination`` for post-mortem inspection.  Callers must
+    keep ``destination`` **outside** the checkout: a copy inside the clone would
+    be matched by the reviewer's rename ``grep`` and reported as a stale
+    reference.
 
     Returns:
-        True when the policy file exists at the base commit and was written.
+        The policy text, or an empty string when the file does not exist at
+        that commit.
     """
     if base.startswith("-"):
         logger.error("rejecting policy extraction: base ref %r starts with '-'", base)
-        return False
+        return ""
     result = subprocess.run(
         [
             "git",
@@ -302,6 +309,6 @@ def extract_policy(
         timeout=30,
     )
     if result.returncode != 0:
-        return False
+        return ""
     Path(destination).write_text(result.stdout, encoding="utf-8")
-    return True
+    return result.stdout

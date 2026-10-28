@@ -9,6 +9,7 @@ model that wanders into unrelated code cannot turn that into review noise.
 
 import json
 import logging
+import posixpath
 import re
 from dataclasses import dataclass
 
@@ -129,7 +130,27 @@ def _normalize_verdict(value: object) -> str:
     raise VerdictError(f"unrecognised verdict {value!r}")
 
 
-def _parse_findings(payload: dict, lines: list[str]) -> tuple[tuple[Finding, ...], int]:
+def _matches_ignored(file: str, ignored_paths: tuple[str, ...]) -> bool:
+    """Return ``True`` when *file* names a path hermit injected itself.
+
+    The extracted policy copy is hermit-owned scratch, never repository
+    content, so a finding may not target it. The comparison is on the file name:
+    the model may echo the absolute path, a checkout-relative path, or the bare
+    name, and ``.hermit-policy.md`` is a name hermit reserves.
+    """
+    cleaned = file.strip().strip("`").strip()
+    if not cleaned:
+        return False
+    name = posixpath.basename(posixpath.normpath(cleaned.replace("\\", "/")))
+    return any(
+        name == posixpath.basename(posixpath.normpath(ignored.strip()))
+        for ignored in ignored_paths
+    )
+
+
+def _parse_findings(
+    payload: dict, lines: list[str], ignored_paths: tuple[str, ...] = ()
+) -> tuple[tuple[Finding, ...], int]:
     """Build findings, dropping any whose anchor is not in the diff."""
     findings: list[Finding] = []
     dropped = 0
@@ -143,6 +164,13 @@ def _parse_findings(payload: dict, lines: list[str]) -> tuple[tuple[Finding, ...
                 continue
             anchor = str(entry.get("anchor") or "")
             title = str(entry.get("title") or "Untitled")
+            file = str(entry.get("file") or "")
+            if _matches_ignored(file, ignored_paths):
+                dropped += 1
+                logger.warning(
+                    "dropping %s finding on hermit scratch path %r", severity, file
+                )
+                continue
             if not anchor_matches(anchor, lines):
                 dropped += 1
                 logger.warning(
@@ -157,7 +185,7 @@ def _parse_findings(payload: dict, lines: list[str]) -> tuple[tuple[Finding, ...
                     detail=str(entry.get("detail") or ""),
                     fix=str(entry.get("fix") or ""),
                     impact=str(entry.get("impact") or ""),
-                    file=str(entry.get("file") or ""),
+                    file=file,
                     line=line if isinstance(line, int) else 0,
                     anchor=anchor.strip(),
                 )
@@ -165,12 +193,17 @@ def _parse_findings(payload: dict, lines: list[str]) -> tuple[tuple[Finding, ...
     return tuple(findings), dropped
 
 
-def parse_verdict(output: str, diff: str) -> Review:
+def parse_verdict(
+    output: str, diff: str, *, ignored_paths: tuple[str, ...] = ()
+) -> Review:
     """Parse and validate the model output against the diff it reviewed.
 
     Args:
         output: The text produced by opencode.
         diff: The diff handed to the model, used to verify every anchor.
+        ignored_paths: Paths hermit wrote itself (the extracted policy copy).
+            A finding naming one of them is discarded: it would report
+            scratch data as repository content.
 
     Raises:
         VerdictError: if there is no JSON, no summary, no valid verdict, or the
@@ -183,7 +216,7 @@ def parse_verdict(output: str, diff: str) -> Review:
     if not summary:
         raise VerdictError("JSON verdict has no `summary`")
     verdict = _normalize_verdict(payload["verdict"])
-    findings, dropped = _parse_findings(payload, changed_lines(diff))
+    findings, dropped = _parse_findings(payload, changed_lines(diff), ignored_paths)
     if verdict == APPROVE and any(
         finding.severity in BLOCKING_SEVERITIES for finding in findings
     ):
