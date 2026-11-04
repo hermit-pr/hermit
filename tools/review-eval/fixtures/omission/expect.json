@@ -1,0 +1,6 @@
+{
+  "title": "Merge two certificate scripts into one",
+  "verdict": "Request changes",
+  "must_mention_any": ["errexit", "set -e"],
+  "max_findings": 4
+}

@@ -77,7 +77,17 @@ DEFAULT_REVIEW_RULES = (
     "report it as a stale reference, and never anchor a finding on it.\n"
     "- Do not browse anything no changed name reaches. `git show "
     "target-branch:<path>` shows a file as it was on the target branch.\n"
-    "- The diff is already provided: never run `git diff` to rebuild it.\n\n"
+    "- The diff is already provided: do not run `git diff` to rebuild the "
+    "whole change. Run `git diff target-branch -- <path>` only when the "
+    "truncation notice says that file was cut.\n\n"
+    "STEP 3 — be honest about what you did not verify\n"
+    "- An `Approve` is a claim about every added and removed line you read, not "
+    "about the lines you skipped. If a risk this diff may have introduced is "
+    "still open after inspection, report it at `low` and say in `impact` what "
+    "you could not rule out.\n"
+    "- For a diff that changes 60 lines or more, a summary with no finding is "
+    "only valid when it names, for each changed file, the risk you checked and "
+    "ruled out. If you cannot name one, report the open risk at `low`.\n\n"
     "Approval gate\n"
     "- `Approve` means: I read every added, removed, and changed line, checked "
     "them against STEP 1, and nothing outside the diff still uses a name this "
@@ -96,21 +106,30 @@ DEFAULT_REVIEW_RULES = (
     "- Do NOT report: pre-existing bugs in code this diff does not touch, "
     "unrelated files, style of untouched code, missing tests unrelated to the "
     "change, hypothetical future problems, or 'consider also' suggestions.\n"
-    "- When in doubt about a finding this diff did not cause, drop it. Noise "
-    "is reporting what this diff did not cause; silence about what it broke is "
-    "worse.\n\n"
+    "- When a suspected defect predates this diff and no changed line causes "
+    "it, drop it. When the doubt is about whether this diff caused it, report "
+    "it at `low` and state the doubt in `impact`: a verified scope is not a "
+    "reason to hide an unverified risk.\n"
+    "- Report a regression by omission even though it has no removed line of "
+    "its own: when a rewritten file drops a protection it used to declare "
+    "(`set -e`, `set -u`, `pipefail`, a `trap … EXIT`, a `|| exit` guard), "
+    "report it at `medium`, anchored on the added line that now configures the "
+    "file (for example `set -uo pipefail`).\n\n"
     "Findings must be anchored\n"
     "- `anchor`: an exact quote (at most 120 characters) of one added or "
-    "removed line of the diff — the line that CAUSES the impact. Findings "
-    "whose anchor is not in the diff are discarded automatically, so copy the "
-    "line verbatim.\n"
+    "removed line of the diff — the line that CAUSES the impact, or, for a "
+    "regression by omission, the added line that replaces the lost protection "
+    "(for example `set -uo pipefail`). An anchor that is not in the diff is "
+    "downgraded to `low` when the finding names a changed file, and discarded "
+    "otherwise, so copy the line verbatim.\n"
     "- When the impact is in another file, the anchor is still the changed "
     "line of the diff (the renamed `def`, the removed import, the new "
     "signature), never the stale reference in the affected file.\n"
     "- `file` and `line`: where the impact is. They usually differ from the "
     "file of the anchor.\n"
-    "- If you cannot quote a diff line that causes the impact, the finding is "
-    "out of scope: drop it.\n\n"
+    "- If you cannot quote a diff line that causes the impact and the finding "
+    "is not an omission, the finding is out of scope: drop it. An omission is "
+    "anchored on the added line that should have carried the protection.\n\n"
     "Example — the diff renames `parse_config` to `load_config` in config.py "
     "but worker.py is not updated. `grep parse_config` returns worker.py, "
     "which this diff does not update:\n"
@@ -127,9 +146,12 @@ DEFAULT_REVIEW_RULES = (
     "reference the diff failed to update (including in a file the diff does "
     "not change), an added value that contradicts another value, its "
     "description, or its documentation, a missed edge case with real impact.\n"
-    "- low: an inconsistency with project conventions introduced by this "
-    "diff, with no functional impact.\n"
-    "- Do not inflate severity; drop anything the diff did not cause.\n\n"
+    "- low: a risk this diff may have introduced that you could not rule out, "
+    "behaviour you could not verify, or an inconsistency with project "
+    "conventions introduced by this diff with no functional impact. State the "
+    "open question in `impact`.\n"
+    "- Do not inflate severity; a low finding is a risk you could not rule "
+    "out, not a reason to stay silent.\n\n"
     "Output format — exactly one JSON block:\n"
     "```json\n"
     "{\n"
@@ -146,11 +168,14 @@ DEFAULT_REVIEW_RULES = (
     "}\n"
     "```\n\n"
     "Rules:\n"
-    "- `summary` is mandatory, even for an approval: name the files or the "
-    "behavior that changed.\n"
+    "- `summary` is mandatory, even for an approval: name every file the diff "
+    "changed and, for each one, the main risk you checked and ruled out (or "
+    "the risk that remains open). A summary that names no risk is not an "
+    "inspection.\n"
     "- Omit empty sections or use empty arrays.\n"
     '- `verdict` is "Request changes" when any critical or medium finding '
-    'exists, otherwise "Approve".\n'
+    'exists, otherwise "Approve". A `low` finding does not block, but it must '
+    "be listed, never dropped.\n"
 )
 
 
@@ -226,7 +251,7 @@ class Settings(_SettingsBase):
     )
     opencode_timeout_seconds: int = 900
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 12
+    review_max_steps: int = 24
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -364,7 +389,7 @@ class SlaveSettings(_SettingsBase):
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_timeout_seconds: int = 900
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 12
+    review_max_steps: int = 24
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

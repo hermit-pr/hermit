@@ -133,7 +133,7 @@ def test_prompt_and_review_budget_defaults() -> None:
     """The injected diff cap and the step budget have documented defaults."""
     settings = make_settings()
     assert settings.max_prompt_diff_bytes == 65536
-    assert settings.review_max_steps == 12
+    assert settings.review_max_steps == 24
 
 
 def test_prompt_and_review_budget_are_overridable(

@@ -166,9 +166,10 @@ async def run_review(settings: SlaveSettings) -> str:
     review = parse_verdict(output, diff, ignored_paths=(policy_path,))
     output = render_markdown(review)
     logger.info(
-        "validated verdict %r with %d finding(s), dropped %d outside the diff",
+        "validated verdict %r with %d finding(s), %d downgraded, %d dropped",
         review.verdict,
         len(review.findings),
+        review.relaxed,
         review.dropped,
     )
     header = (

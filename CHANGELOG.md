@@ -5,6 +5,67 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The verdict gate no longer hides the findings it filters.** A model finding
+  whose anchor is not in the diff was dropped with only a log line, so "0
+  findings" was indistinguishable from "4 findings produced and thrown away".
+  Findings on a changed file are now downgraded to `low` with an
+  `[unanchored]` or `[misanchored]` marker instead of disappearing, the count
+  is printed in the summary (`Coverage: N downgraded; M discarded`), and a
+  model that emits a top-level `findings` array is no longer ignored entirely.
+  See [#12](https://gitlab.com/hermit-bot/hermit/-/work_items/12).
+- **A review can say it is inconclusive.** `Review inconclusive` is now a third
+  verdict: an empty `Approve` on a diff of 60 changed lines or more (or one
+  whose only findings were downgraded), or a `Request changes` with no verified
+  finding, is published as inconclusive instead of being approved or failing
+  the whole job with no review. An explicit inconclusive verdict that still
+  lists findings keeps them and no longer claims that nothing was verified; a
+  valid critical/medium finding still forces `Request changes`.
+- **Regressions by omission are computed by hermit.** A rewrite that adds a
+  `set -` line but drops a protection the removed lines declared (`set -e`,
+  `set -u`, `pipefail`, a `trap … EXIT`, an `|| exit` guard) now produces a
+  deterministic `medium` finding anchored on the added configuration line. A
+  modified or renamed file is compared with its own removed lines; a new file
+  is compared with the deleted scripts in the same directory (the merge shape),
+  so an unrelated addition cannot blame a deletion. The check ignores comments
+  and unrelated `set -x`, accepts reworded guards such as
+  `|| { echo failed; exit 1; }`, reports every rewritten file, and lets sibling
+  losses coexist: a finding quoting `set -euo pipefail` no longer hides the
+  `pipefail` loss.
+- **Verdict normalisation is conservative.** A `Request changes` whose only
+  finding was downgraded to `low` is now `Review inconclusive` (it has no
+  verified finding), the canonical `Review inconclusive` wording is accepted,
+  and an unrecognised severity word such as `suggestion` stays advisory at
+  `low` instead of being promoted to blocking `medium`.
+- **The rules no longer instruct the model to stay silent.** "When in doubt,
+  drop it" became "report it at `low` and state the doubt", `low` now covers a
+  risk the diff may have introduced that was not ruled out, an omission has an
+  explicit anchor (the added `set -` line), and the summary must name the risk
+  checked per changed file. The system prompt also stops forbidding the
+  `git diff target-branch -- <path>` escape hatch that the truncation notice
+  advertises.
+- **The diff budget is per file.** Truncation now splits the diff into
+  per-file sections, gives vendored paths (lock files, bundles, vendored trees)
+  a smaller share, and labels each cut section with the command to read it, so
+  files later in path order are no longer evicted wholesale. The default review
+  step budget is now 24 instead of 12.
+- **A failed review says why.** The commit status description now carries the
+  first line of the reviewer's failure report (an expired token, an invalid
+  model id, a clone error) instead of the generic `Review failed (pod error).`,
+  so the cause is visible on the pull request without reading pod logs. The
+  pod's own `Review failed:` prefix is stripped before the master adds it, and
+  credentials (`https://user:token@…`) and token-like values are redacted
+  before publication, so the status is neither double-prefixed nor a secret
+  leak.
+- **The evaluation harness runs against the real vLLM endpoint again.**
+  `OPENCODE_CONFIG` replaces the global configuration, so the generated eval
+  config now carries the provider block, policies, and permissions of the
+  reviewer pod, with temperature pinned to `0`. New `--endpoint` and
+  `--api-key` options default to `HERMIT_VLLM_ENDPOINT` / `HERMIT_VLLM_API_KEY`.
+
 ## [0.4.2] - 2026-10-28
 
 ### Fixed

@@ -101,7 +101,37 @@ def test_build_review_prompt_truncates_oversized_diff() -> None:
     assert "+line 0" in prompt
     assert "+line 499" not in prompt
     assert "diff truncated" in prompt
+    assert "truncated by hermit" in prompt
     assert "git diff target-branch -- <path>" in prompt
+
+
+def test_build_review_prompt_keeps_later_files_visible() -> None:
+    """A large first file cannot evict the files that follow it."""
+    first = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n" + "".join(
+        f"+a {index}\n" for index in range(300)
+    )
+    later = (
+        "diff --git a/z.py b/z.py\n--- a/z.py\n+++ b/z.py\n@@ -1 +1 @@\n+z changed\n"
+    )
+    prompt = build_review_prompt(
+        "github", "acme/app", "42", diff=first + later, max_diff_bytes=1024
+    )
+    assert "z changed" in prompt
+    assert "`a.py` truncated by hermit" in prompt
+
+
+def test_build_review_prompt_bounds_many_file_sections() -> None:
+    """Thousands of tiny files cannot turn the budget into an unbounded prompt."""
+    diff = "".join(
+        f"diff --git a/f{index}.py b/f{index}.py\n"
+        f"--- a/f{index}.py\n+++ b/f{index}.py\n@@ -1 +1 @@\n+{index}\n"
+        for index in range(50)
+    )
+    prompt = build_review_prompt(
+        "github", "acme/app", "42", diff=diff, max_diff_bytes=512
+    )
+    assert "file section(s) omitted by hermit" in prompt
+    assert "diff --git" not in prompt
 
 
 def test_build_review_prompt_without_diff_asks_for_it() -> None:
@@ -320,7 +350,7 @@ async def test_review_includes_header(
     assert "structured finding" in body
     assert reported["body"] == body
     assert runners[0].kwargs["cwd"] == str(tmp_path / "repo")
-    assert runners[0].kwargs["max_steps"] == 12
+    assert runners[0].kwargs["max_steps"] == 24
     assert "+line" in runners[0].prompt
     assert "file.txt | 1 +" in runners[0].prompt
     assert "# project rules" in runners[0].prompt
