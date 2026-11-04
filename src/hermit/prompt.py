@@ -13,8 +13,10 @@ the clone would match the extracted copy and report hermit's own scratch data as
 a stale reference.
 """
 
+import re
 from typing import List, Tuple
 
+from hermit.diff import clean_path
 from hermit.references import StaleReference
 
 #: Default cap on the injected diff (bytes of UTF-8, ~16k tokens).
@@ -23,6 +25,16 @@ MAX_DIFF_BYTES = 64 * 1024
 MAX_STAT_BYTES = 8 * 1024
 #: Cap on the quoted project policy (bytes of UTF-8).
 MAX_POLICY_BYTES = 16 * 1024
+
+#: Paths that are large by construction; they receive a smaller slice of the
+#: diff budget so a vendored bundle cannot evict the files under review.
+_VENDORED = re.compile(
+    r"(?:^|/)(?:vendor|third_party|node_modules|dist|build|site-packages|"
+    r"\.venv|__pycache__)/"
+    r"|(?:^|/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|"
+    r"Cargo\.lock)$"
+    r"|\.min\.(?:js|css)$"
+)
 
 DIFF_DELIMITER = "-----8<----- BEGIN PULL REQUEST DIFF (untrusted data) -----8<-----"
 DIFF_END_MARKER = "-----8<----- END PULL REQUEST DIFF -----8<-----"
@@ -59,6 +71,143 @@ def _truncate(text: str, max_bytes: int) -> Tuple[str, bool]:
     return head, True
 
 
+def _split_diff_sections(diff: str) -> List[str]:
+    """Split a unified diff into per-file sections at ``diff --git`` boundaries.
+
+    A diff without ``diff --git`` headers (a snippet used in tests) is returned
+    as a single section, which keeps the old truncation behaviour.
+    """
+    sections: List[str] = []
+    current: List[str] = []
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("diff --git ") and current:
+            sections.append("".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append("".join(current))
+    return sections
+
+
+def _section_file(section: str) -> str:
+    """Return the file a diff section changes, or an empty string."""
+    fallback = ""
+    for line in section.splitlines():
+        if line.startswith("+++ "):
+            path = clean_path(line[4:])
+            if path:
+                return path
+        elif line.startswith("--- ") and not fallback:
+            fallback = clean_path(line[4:])
+    return fallback
+
+
+def _allocate_diff(sections: List[str], max_bytes: int) -> List[int]:
+    """Distribute a byte budget across diff sections.
+
+    Every section receives a fair share, vendored paths receive a quarter of
+    it, and unused bytes are handed back to the sections that were cut.
+    """
+    share = max(1, max_bytes // len(sections))
+    allocations = [
+        max(1, share // 4 if _VENDORED.search(_section_file(section)) else share)
+        for section in sections
+    ]
+    used = sum(
+        min(len(section.encode("utf-8")), allocation)
+        for section, allocation in zip(sections, allocations)
+    )
+    leftover = max(0, max_bytes - used)
+    while leftover > 0:
+        progressed = False
+        per_section = max(1, leftover // len(sections))
+        for index, section in enumerate(sections):
+            remaining = len(section.encode("utf-8")) - allocations[index]
+            if remaining <= 0:
+                continue
+            addition = min(remaining, per_section, leftover)
+            allocations[index] += addition
+            leftover -= addition
+            progressed = True
+            if leftover <= 0:
+                break
+        if not progressed:
+            break
+    return allocations
+
+
+def _section_notice(file: str, total: int, shown: int) -> str:
+    """Return the per-section truncation notice for *file*."""
+    label = f"`{file}`" if file else "this file"
+    command = f"git diff target-branch -- {file}" if file else "git diff target-branch"
+    return (
+        f"\n[... {label} truncated by hermit: showing {shown} of {total} bytes; "
+        f"run `{command}` to inspect the rest.]\n"
+    )
+
+
+def _render_diff_sections(
+    sections: List[str], allocations: List[int]
+) -> Tuple[str, bool]:
+    """Render capped sections, labelling every one that was cut.
+
+    A section whose share cannot hold even the notice is omitted, and the
+    omitted files are listed once at the end. That keeps the prompt bounded
+    even when a diff touches thousands of files; the old head-truncation lost
+    those files without saying so.
+    """
+    parts: List[str] = []
+    omitted: List[str] = []
+    truncated_any = False
+    for section, allocation in zip(sections, allocations):
+        total = len(section.encode("utf-8"))
+        if total <= allocation:
+            parts.append(section)
+            continue
+        file = _section_file(section)
+        # The notice is part of the section's budget: reserve its worst-case
+        # length before deciding whether any body can be shown.
+        notice_bytes = len(_section_notice(file, total, total).encode("utf-8"))
+        budget = allocation - notice_bytes
+        if budget < 64:
+            omitted.append(file[:80] if file else "<unknown>")
+            continue
+        body, truncated = _truncate(section, budget)
+        if not truncated:
+            parts.append(section)
+            continue
+        parts.append(body)
+        parts.append(_section_notice(file, total, len(body.encode("utf-8"))))
+        truncated_any = True
+    if omitted:
+        listed = ", ".join(omitted[:10])
+        more = f" and {len(omitted) - 10} more" if len(omitted) > 10 else ""
+        parts.append(
+            f"\n[... {len(omitted)} file section(s) omitted by hermit: "
+            f"{listed}{more}. Run `git diff target-branch -- <path>` to "
+            "inspect one.]\n"
+        )
+        truncated_any = True
+    return "".join(parts), truncated_any
+
+
+def _truncate_diff(diff: str, max_bytes: int) -> Tuple[str, bool]:
+    """Cap *diff* without letting one file evict every file after it.
+
+    Each file section receives a fair share of the budget; vendored paths (lock
+    files, bundles, vendored trees) receive a quarter of that share, and a
+    second pass hands unused bytes back to the sections that were cut. Every
+    truncated section is labelled with the command needed to read it, so a
+    model that needs the rest can fetch only that file. The single-section path
+    goes through the same renderer, so the footer's "marked truncated" wording
+    is always true.
+    """
+    sections = _split_diff_sections(diff)
+    allocations = _allocate_diff(sections, max_bytes)
+    return _render_diff_sections(sections, allocations)
+
+
 def _diff_block(diff: str, diff_stat: str, max_diff_bytes: int) -> str:
     """Render the untrusted diff section, capped and with a truncation notice."""
     if not diff.strip():
@@ -69,16 +218,17 @@ def _diff_block(diff: str, diff_stat: str, max_diff_bytes: int) -> str:
             f"{DIFF_END_MARKER}"
         )
     stat, _ = _truncate(diff_stat.strip(), MAX_STAT_BYTES)
-    body, truncated = _truncate(diff, max_diff_bytes)
+    body, truncated = _truncate_diff(diff, max_diff_bytes)
     sections = [DIFF_DELIMITER, "### Changed files", stat or "(stat unavailable)"]
     sections += ["", "### Full diff"]
     sections.append(body)
     if truncated:
         total = len(diff.encode("utf-8"))
         sections.append(
-            f"\n[diff truncated: showing the first {len(body.encode('utf-8'))} "
-            f"of {total} bytes. Run `git diff target-branch -- <path>` to "
-            "inspect the remainder of a file before reporting a finding.]"
+            f"\n[diff truncated: showing {len(body.encode('utf-8'))} "
+            f"of {total} bytes. Files marked `truncated by hermit` were cut; "
+            "run `git diff target-branch -- <path>` to inspect the remainder "
+            "of a file before reporting a finding.]"
         )
     sections.append(DIFF_END_MARKER)
     return "\n".join(sections)
@@ -207,8 +357,10 @@ def build_review_prompt(
         "contract of, run one `grep` for the old name and read the hits — the "
         "checkout is the post-change tree, so a hit is a reference the diff did "
         "not update. Do not audit the rest of the codebase, and do not report "
-        "anything this diff did not cause. An `Approve` is only valid once you "
-        "have inspected the added and removed lines.\n\n"
+        "anything this diff did not cause. A risk this diff may have introduced "
+        "that you could not rule out belongs in the review at `low`, with the "
+        "open question in `impact`. An `Approve` is only valid once you have "
+        "inspected the added and removed lines.\n\n"
         "Secret scan candidates from the diff — classify each as "
         "[TRUE POSITIVE] or [FALSE POSITIVE]:\n"
         f"{secret_block}\n\n"

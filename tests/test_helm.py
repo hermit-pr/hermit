@@ -115,7 +115,7 @@ def test_configmap_exports_prompt_and_step_budgets() -> None:
     assert "HERMIT_MAX_PROMPT_DIFF_BYTES" in configmap
     assert "HERMIT_REVIEW_MAX_STEPS" in configmap
     assert "maxPromptDiffBytes: 65536" in values
-    assert "reviewMaxSteps: 12" in values
+    assert "reviewMaxSteps: 24" in values
 
 
 def test_chart_pins_an_opencode_2_release() -> None:

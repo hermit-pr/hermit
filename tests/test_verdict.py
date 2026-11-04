@@ -4,12 +4,12 @@ import json
 
 import pytest
 
+from hermit.diff import anchor_matches, changed_lines
 from hermit.verdict import (
     APPROVE,
+    INCONCLUSIVE,
     REQUEST_CHANGES,
     VerdictError,
-    anchor_matches,
-    changed_lines,
     parse_verdict,
     render_markdown,
 )
@@ -24,6 +24,21 @@ DIFF = (
     "     with open(path) as handle:\n"
     "-        return json.load(handle)\n"
     "+        return json.loads(handle.read())\n"
+)
+
+TWO_FILE_DIFF = (
+    "diff --git a/parse.py b/parse.py\n"
+    "--- a/parse.py\n"
+    "+++ b/parse.py\n"
+    "@@ -1,1 +1,1 @@\n"
+    "-old_parse()\n"
+    "+new_parse()\n"
+    "diff --git a/worker.py b/worker.py\n"
+    "--- a/worker.py\n"
+    "+++ b/worker.py\n"
+    "@@ -1,1 +1,1 @@\n"
+    "-old_worker()\n"
+    "+new_worker()\n"
 )
 
 
@@ -175,13 +190,218 @@ def test_parse_verdict_keeps_findings_on_repository_files() -> None:
     assert review.dropped == 0
 
 
-def test_parse_verdict_rejects_request_changes_without_findings() -> None:
-    """Ask for changes without an anchored finding is a failed review."""
-    with pytest.raises(VerdictError, match="no finding is anchored"):
-        parse_verdict(
-            _payload(medium=[_finding(anchor="elsewhere")], verdict="Request changes"),
-            DIFF,
-        )
+def test_parse_verdict_marks_request_changes_without_findings_inconclusive() -> None:
+    """Ask for changes without a verified finding is inconclusive, not fatal.
+
+    Failing the whole job left the PR with a generic "Review failed" status and
+    no review at all; the missing finding is a result the reader must see.
+    """
+    review = parse_verdict(
+        _payload(medium=[_finding(anchor="elsewhere")], verdict="Request changes"),
+        DIFF,
+    )
+    assert review.verdict == INCONCLUSIVE
+    assert not review.findings
+    assert review.dropped == 1
+    markdown = render_markdown(review)
+    assert "**Review inconclusive**" in markdown
+    assert "this is not an approval" in markdown
+
+
+def test_parse_verdict_marks_large_empty_approve_inconclusive() -> None:
+    """A silent Approve on a substantial diff is not a verified approval."""
+    diff = "".join(f"+line {index}\n" for index in range(80))
+    review = parse_verdict(_payload(), diff)
+    assert review.verdict == INCONCLUSIVE
+
+
+def test_parse_verdict_keeps_small_empty_approve() -> None:
+    """A tiny diff may still be approved without a finding."""
+    assert parse_verdict(_payload(), DIFF).verdict == APPROVE
+
+
+def test_parse_verdict_downgrades_unanchored_finding_in_a_changed_file() -> None:
+    """A finding on a changed file survives at low instead of disappearing."""
+    review = parse_verdict(
+        _payload(
+            medium=[_finding(anchor="a line that is not in the diff", file="parse.py")],
+            verdict="Request changes",
+        ),
+        DIFF,
+    )
+    assert len(review.findings) == 1
+    finding = review.findings[0]
+    assert finding.severity == "low"
+    assert finding.title.startswith("[unanchored]")
+    assert review.relaxed == 1
+    assert review.dropped == 0
+    assert "1 finding(s) downgraded to low" in review.summary
+    assert review.verdict == INCONCLUSIVE
+
+
+def test_parse_verdict_downgraded_model_finding_does_not_hide_a_deterministic_one() -> (
+    None
+):
+    """A low downgraded finding must not suppress the verified medium finding."""
+    diff = (
+        "diff --git a/run.sh b/run.sh\n"
+        "--- a/run.sh\n"
+        "+++ b/run.sh\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-set -euo pipefail\n"
+        "+set -u\n"
+    )
+    review = parse_verdict(
+        _payload(
+            medium=[
+                _finding(
+                    title="Missing set -e",
+                    file="run.sh",
+                    anchor="a line that is not in the diff",
+                    detail="errexit is missing",
+                )
+            ],
+            verdict="Request changes",
+        ),
+        diff,
+    )
+    titles = [finding.title for finding in review.findings]
+    assert "Shell protection removed: errexit (set -e)" in titles
+    assert "Shell protection removed: pipefail (set -o pipefail)" in titles
+    assert review.verdict == REQUEST_CHANGES
+
+
+def test_parse_verdict_unknown_severity_stays_advisory() -> None:
+    """An unrecognised severity word must not become a blocking finding."""
+    payload = {
+        "summary": "Renames the parser.",
+        "findings": [_finding(severity="suggestion")],
+        "verdict": "Approve",
+    }
+    review = parse_verdict(
+        "```json\n" + json.dumps(payload) + "\n```",
+        DIFF,
+    )
+    assert len(review.findings) == 1
+    assert review.findings[0].severity == "low"
+    assert review.verdict == APPROVE
+
+
+def test_parse_verdict_accepts_the_canonical_inconclusive_wording() -> None:
+    """The documented ``Review inconclusive`` string is a valid verdict."""
+    review = parse_verdict(_payload(verdict="Review inconclusive"), DIFF)
+    assert review.verdict == INCONCLUSIVE
+
+
+def test_parse_verdict_downgrades_anchor_from_another_changed_file() -> None:
+    """An anchor that belongs to another changed file is misanchored, not trust."""
+    review = parse_verdict(
+        _payload(
+            medium=[_finding(anchor="+new_worker()", file="parse.py")],
+            verdict="Request changes",
+        ),
+        TWO_FILE_DIFF,
+    )
+    assert len(review.findings) == 1
+    finding = review.findings[0]
+    assert finding.severity == "low"
+    assert finding.title.startswith("[misanchored]")
+    assert review.relaxed == 1
+
+
+def test_parse_verdict_resolves_the_line_from_the_anchor() -> None:
+    """A wrong model line number is replaced by the anchor's real position."""
+    review = parse_verdict(
+        _payload(
+            medium=[_finding(file="parse.py", line=99)], verdict="Request changes"
+        ),
+        DIFF,
+    )
+    assert review.findings[0].line == 10
+
+
+def test_parse_verdict_matches_a_long_anchor_by_prefix() -> None:
+    """A compacted YAML line longer than the cap is still anchorable."""
+    line = "x" * 600
+    diff = (
+        "diff --git a/big.txt b/big.txt\n"
+        "--- a/big.txt\n"
+        "+++ b/big.txt\n"
+        "@@ -1 +1 @@\n"
+        f"+{line}\n"
+    )
+    review = parse_verdict(
+        _payload(
+            medium=[_finding(file="big.txt", anchor=line)], verdict="Request changes"
+        ),
+        diff,
+    )
+    assert len(review.findings) == 1
+    assert review.findings[0].severity == "medium"
+
+
+def test_parse_verdict_inconclusive_when_only_downgraded() -> None:
+    """An unanchored finding is not evidence for approving a substantial diff."""
+    diff = (
+        "diff --git a/app.py b/app.py\n"
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -1 +1 @@\n" + "".join(f"+line {index}\n" for index in range(80))
+    )
+    review = parse_verdict(
+        _payload(
+            medium=[_finding(file="app.py", anchor="a line that is not there")],
+            verdict="Approve",
+        ),
+        diff,
+    )
+    assert review.verdict == INCONCLUSIVE
+    assert len(review.findings) == 1
+    assert review.findings[0].severity == "low"
+    assert review.relaxed == 1
+    markdown = render_markdown(review)
+    assert "did not reach a verified verdict" in markdown
+
+
+def test_parse_verdict_keeps_findings_when_the_model_says_inconclusive() -> None:
+    """An explicit inconclusive verdict keeps the low findings it lists."""
+    review = parse_verdict(
+        _payload(low=[_finding()], verdict="inconclusive"),
+        DIFF,
+    )
+    assert review.verdict == INCONCLUSIVE
+    assert len(review.findings) == 1
+    markdown = render_markdown(review)
+    assert "did not reach a verified verdict" in markdown
+    assert "No finding was verified" not in markdown
+
+
+def test_parse_verdict_blocking_finding_overrides_an_inconclusive_verdict() -> None:
+    """A valid medium finding still requires changes when the model hedges."""
+    review = parse_verdict(
+        _payload(medium=[_finding()], verdict="inconclusive"),
+        DIFF,
+    )
+    assert review.verdict == REQUEST_CHANGES
+    assert len(review.findings) == 1
+
+
+def test_parse_verdict_reads_a_top_level_findings_array() -> None:
+    """Models that use ``findings`` with a severity field are not ignored."""
+    payload = {
+        "summary": "Renames the parser.",
+        "findings": [
+            _finding(severity="high", title="caller not updated"),
+        ],
+        "verdict": "Request changes",
+    }
+    review = parse_verdict(
+        "```json\n" + json.dumps(payload) + "\n```",
+        DIFF,
+    )
+    assert len(review.findings) == 1
+    assert review.findings[0].severity == "critical"
+    assert review.verdict == REQUEST_CHANGES
 
 
 def test_parse_verdict_forces_request_changes_for_blocking_findings() -> None:

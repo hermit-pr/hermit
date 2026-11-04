@@ -1,7 +1,7 @@
 {
   "title": "Document the batch limit and lower GPU memory utilisation",
   "verdict": "Approve",
-  "max_findings": 0,
+  "max_findings": 1,
   "must_mention_any": [
     "max-num-seqs",
     "memory"

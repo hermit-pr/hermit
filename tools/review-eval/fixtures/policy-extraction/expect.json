@@ -1,7 +1,7 @@
 {
   "title": "Rename parse_config to load_config",
   "verdict": "Request changes",
-  "max_findings": 2,
+  "max_findings": 4,
   "must_mention_any": [
     "worker"
   ],

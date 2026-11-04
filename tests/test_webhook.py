@@ -18,6 +18,7 @@ from hermit.providers.base import GitClient
 from hermit.ratelimit import RateLimiter
 from hermit.server import _drain_body as drain_body
 from hermit.server import (
+    _failure_description,
     _post_review,
     _resolve_durable_state,
     create_app,
@@ -33,6 +34,7 @@ class FakeClient(GitClient):
         super().__init__(endpoint="https://ignored", token="fake")
         self.posted: list[str] = []
         self.statuses: list[str] = []
+        self.descriptions: list[str] = []
         self.resolved: dict[str, str] = {}
 
     def headers(self) -> dict[str, str]:
@@ -48,6 +50,7 @@ class FakeClient(GitClient):
     ) -> None:
         """Record a commit status update."""
         self.statuses.append(state)
+        self.descriptions.append(description)
 
     async def resolve_refs(self, event: ChangeEvent) -> ChangeEvent:
         """Fill refs from the recorded override map."""
@@ -185,6 +188,60 @@ async def test_github_webhook_publishes_review_via_pod() -> None:
         )
         assert report.status_code == 200
     assert client.posted == ["Review: this looks good."]
+
+
+async def test_failure_report_surfaces_the_cause_in_the_status() -> None:
+    """The commit status carries the first line of the reported failure.
+
+    A generic "Review failed (pod error)." turned an expired token or an
+    invalid model id into hours of misdiagnosis.
+    """
+    client = FakeClient()
+    spawner = FakePodSpawner()
+    store = JobStore()
+    app = create_app(_settings(), client, spawner, store)
+    payload = _github_pr_payload()
+    async with _client(app) as http:
+        response = await http.post(
+            "/webhook/github",
+            content=json.dumps(payload).encode(),
+            headers={
+                "X-Hub-Signature-256": _github_signature(json.dumps(payload).encode())
+            },
+        )
+        assert response.status_code == 202
+        job = store.all()[0]
+        report = await http.post(
+            f"/internal/report/{job.id}",
+            json={
+                "success": False,
+                "body": (
+                    "Review failed: remote: Password authentication is not "
+                    "available for Git operations\nfatal: could not read from "
+                    "remote"
+                ),
+            },
+            headers={"X-Hermit-Report-Secret": job.report_secret},
+        )
+        assert report.status_code == 200
+    assert client.statuses[-1] == "error"
+    assert client.descriptions[-1] == (
+        "Review failed: remote: Password authentication is not available for "
+        "Git operations"
+    )
+
+
+def test_failure_description_redacts_credentials() -> None:
+    """Credentials embedded in the published status are redacted."""
+    description = _failure_description(
+        "Review failed: fatal: unable to access "
+        "'https://oauth2:glpat-secret123456@gitlab.example/acme/app.git': "
+        "HTTP 401 (token ghp_abcdefgh12345678)"
+    )
+    assert "glpat-secret" not in description
+    assert "ghp_abcdefgh" not in description
+    assert "https://gitlab.example/acme/app.git" in description
+    assert description.startswith("Review failed: fatal: unable to access")
 
 
 async def test_github_webhook_ignores_other_events() -> None:

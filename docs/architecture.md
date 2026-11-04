@@ -60,9 +60,13 @@ External systems:
       (`opencode run --file …`): a bare path argument is sent to the model as
       literal text, so the agent never saw the PR context, the diff, or the
       review instructions. The computed diff (`git diff target-branch`, capped
-      by `HERMIT_MAX_PROMPT_DIFF_BYTES` with an explicit truncation notice) is
+      by `HERMIT_MAX_PROMPT_DIFF_BYTES` with a per-file truncation notice) is
       injected into that prompt as the single source of truth, so the reviewer
-      never has to reconstruct the change by walking the tree. The project
+      never has to reconstruct the change by walking the tree. The budget is
+      split across file sections (vendored paths receive a smaller share) so a
+      large first file cannot evict every file after it; a section that was cut
+      tells the model which `git diff target-branch -- <path>` command reads the
+      rest. The project
       policy file (`HERMIT_POLICY_FILE_PATH`) is extracted from the base commit
       and quoted in the same prompt (fenced and capped at 16 KiB) instead of
       being written inside the clone, so the reviewer's rename `grep` can never
@@ -120,10 +124,12 @@ The agent must answer with exactly one JSON block:
 
 `summary` is mandatory, including for approvals, and every finding must quote
 one added or removed line in `anchor`. That quote is the scope contract: the
-slave checks it against the injected diff and drops findings that quote nothing
-in it, so findings about untouched code cannot reach the PR/MR. Cross-file
-impact is still reported — the anchor is the changed line, while `file`/`impact`
-name what it breaks elsewhere.
+slave checks it against the injected diff. A finding on a changed file whose
+anchor cannot be verified is downgraded to `low` with an `[unanchored]` or
+`[misanchored]` marker and counted in the summary; a finding about untouched
+code with no anchor in the diff is discarded and counted. Cross-file impact is
+still reported — the anchor is the changed line, while `file`/`impact` name what
+it breaks elsewhere.
 
 The slave does not rely on the model to find those leftovers: for every name the
 diff removes or renames, it scans the post-change checkout (`git grep`, comments,
@@ -132,6 +138,12 @@ quotes each remaining reference in the prompt with the removed diff line to use
 as the anchor. The model turns a verified fact into a finding instead of
 performing the search.
 
+The same deterministic principle covers regressions by omission: when a diff
+adds a `set -` line but drops a protection the removed lines declared (`set -e`,
+`set -u`, `pipefail`, a `trap … EXIT`, an `|| exit` guard), hermit injects a
+`medium` finding anchored on the added configuration line. That check never
+passes through the anchor gate and does not depend on the model.
+
 An approval is a verdict, not a default: the rules require the reviewer to judge
 every added, removed, and changed line against an explicit checklist
 (correctness, resource feasibility, internal consistency, security posture,
@@ -139,10 +151,14 @@ secret classification, completeness, policy compliance) before it may answer
 `Approve`. Findings naming the extracted policy copy are dropped unconditionally:
 that copy is hermit's scratch data, never repository content.
 
-A review without JSON, without a summary, or asking for changes with no
-anchored finding is a failure: the job fails, the commit status is set to
-error, and no comment is posted. A valid review is rendered as a Summary block,
-Critical/Medium/Low sections, and the verdict.
+A review without JSON or without a summary is a failure: the job fails, the
+commit status is set to error, and no comment is posted. A review with no
+verified finding is published as `Review inconclusive` instead: an empty
+`Approve` on a diff of 60 changed lines or more, or a `Request changes` whose
+findings were all discarded, must not be presented as an approval or as a silent
+failure. A valid review is rendered as a Summary block, Critical/Medium/Low
+sections, and the verdict; the summary also states how many findings were
+downgraded or discarded by validation.
 
 The default `HERMIT_REVIEW_RULES` encodes this structure so every review,
 automatic or manual, is formatted identically.

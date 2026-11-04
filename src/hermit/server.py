@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -35,6 +36,15 @@ from hermit.signing import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Credentials embedded in a URL (``https://user:token@host``) and common
+#: token shapes. The commit-status description is visible to repository users,
+#: so the raw failure line is redacted before it leaves the cluster.
+_URL_CREDENTIALS = re.compile(r"(://)[^/@\s]+@")
+_TOKEN_LIKE = re.compile(
+    r"\b(?:glpat-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|"
+    r"sk-[A-Za-z0-9_-]{8,})\b"
+)
 
 GITHUB_ACTIONS = ("opened", "reopened", "synchronize")
 GITLAB_ACTIONS = ("open", "reopen", "update")
@@ -284,6 +294,32 @@ async def _resolve_durable_state(
             logger.info("job %s: pod %s, treating as posted", job.id, phase)
 
 
+def _redact_failure(text: str) -> str:
+    """Remove credential-bearing URL userinfo and token-like values."""
+    text = _URL_CREDENTIALS.sub(r"\1", text)
+    return _TOKEN_LIKE.sub("[redacted]", text)
+
+
+def _failure_description(error: str) -> str:
+    """Build a bounded commit-status description from a failure message.
+
+    A generic "Review failed (pod error)." hid the real cause (an expired read
+    token, an invalid model id); the first line is what the author needs, and
+    the platform limit is 140 characters. The reviewer pod's report already
+    starts with "Review failed:", so strip that prefix before adding it once.
+    Credentials and token-like values are redacted: the status is visible to
+    repository users, unlike the structured log.
+    """
+    first = next((line.strip() for line in error.splitlines() if line.strip()), "")
+    prefix = "review failed:"
+    while first.lower().startswith(prefix):
+        first = first[len(prefix) :].strip()
+    first = _redact_failure(first)
+    if not first:
+        return "Review failed (pod error)."
+    return f"Review failed: {first[:120]}"
+
+
 async def _set_error_status(
     job: ReviewJob, client: GitClient, description: str
 ) -> None:
@@ -325,7 +361,7 @@ async def _watch_job(
                 job.status = "failed"
                 job.error = "review report timed out"
                 logger.warning("job %s timed out after %.0fs", job.id, timeout)
-                await _set_error_status(job, client, "Review timed out.")
+                await _set_error_status(job, client, _failure_description(job.error))
                 break
             durable, retries = await _fetch_durable(job, spawner, retries, remaining)
             if retries > 0:
@@ -335,7 +371,11 @@ async def _watch_job(
             await _resolve_durable_state(durable, job, spawner)
             if job.status != "pending":
                 if job.status == "failed":
-                    await _set_error_status(job, client, "Review failed (pod error).")
+                    await _set_error_status(
+                        job,
+                        client,
+                        _failure_description(job.error or "reviewer pod failed"),
+                    )
                 break
             try:
                 await asyncio.wait_for(
@@ -602,7 +642,7 @@ async def _handle_report_failure(
             await client.set_commit_status(
                 job.event,
                 "error",
-                description="Review failed (pod error).",
+                description=_failure_description(body),
                 context="hermit/review",
             )
         except httpx.HTTPError:

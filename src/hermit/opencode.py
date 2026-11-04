@@ -195,7 +195,7 @@ class OpenCodeRunner:
         review_rules: str = "",
         timeout: int = 900,
         cwd: Optional[str] = None,
-        max_steps: int = 12,
+        max_steps: int = 24,
     ) -> None:
         self._bin = bin_path
         self._endpoint = endpoint
