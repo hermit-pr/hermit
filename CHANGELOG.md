@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.3] - 2026-11-04
 
 ### Fixed
 
@@ -63,8 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The evaluation harness runs against the real vLLM endpoint again.**
   `OPENCODE_CONFIG` replaces the global configuration, so the generated eval
   config now carries the provider block, policies, and permissions of the
-  reviewer pod, with temperature pinned to `0`. New `--endpoint` and
-  `--api-key` options default to `HERMIT_VLLM_ENDPOINT` / `HERMIT_VLLM_API_KEY`.
+  reviewer pod, with temperature pinned to `0`. New `--provider` selects a
+  built-in OpenCode provider for benchmarking, while `--endpoint` /
+  `--api-key` default to `HERMIT_VLLM_ENDPOINT` / `HERMIT_VLLM_API_KEY` for
+  the production vLLM path.
 
 ## [0.4.2] - 2026-10-28
 
