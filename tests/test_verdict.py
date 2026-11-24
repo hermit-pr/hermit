@@ -469,6 +469,13 @@ def test_inconclusive_review_keeps_the_model_output_tail() -> None:
     assert "Model output (tail)" in markdown
 
 
+def test_inconclusive_review_can_omit_the_output_tail() -> None:
+    """The raw output quote is optional so it never has to reach the PR."""
+    review = inconclusive_review("Approve, nothing to report.", tail_chars=0)
+    assert "Approve, nothing to report." not in review.summary
+    assert "Model output (tail)" not in review.summary
+
+
 def test_nothing_to_review_is_a_neutral_inconclusive_result() -> None:
     """An empty diff is a review result, not a bot failure."""
     review = nothing_to_review()

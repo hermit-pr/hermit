@@ -262,12 +262,14 @@ class _FakeRunner:
         self._output = output
         self.prompt = ""
         self.prompts: list[str] = []
+        self.timeouts: list[float | None] = []
         self.kwargs = kwargs
 
-    async def run(self, prompt: str) -> str:
-        """Record the prompt and return the canned output."""
+    async def run(self, prompt: str, *, timeout: float | None = None) -> str:
+        """Record the prompt and timeout and return the canned output."""
         self.prompt = prompt
         self.prompts.append(prompt)
+        self.timeouts.append(timeout)
         return self._output
 
 
@@ -278,10 +280,11 @@ class _SequenceRunner(_FakeRunner):
         super().__init__(outputs[0], **kwargs)
         self._outputs = outputs
 
-    async def run(self, prompt: str) -> str:
-        """Record the prompt and return the next canned output."""
+    async def run(self, prompt: str, *, timeout: float | None = None) -> str:
+        """Record the prompt and timeout and return the next canned output."""
         self.prompt = prompt
         self.prompts.append(prompt)
+        self.timeouts.append(timeout)
         return self._outputs[min(len(self.prompts), len(self._outputs)) - 1]
 
 
@@ -305,20 +308,22 @@ def _verdict(body: str = "no findings") -> str:
     return f"```json\n{json.dumps(payload)}\n```"
 
 
-def _slave_settings(tmp_path: Path) -> SlaveSettings:
+def _slave_settings(tmp_path: Path, **overrides: object) -> SlaveSettings:
     """Build minimal slave settings pointing at a temporary workspace."""
-    return SlaveSettings(
-        job_id="job1",
-        git_read_token="read-token",
-        repo="acme/app",
-        ref="42",
-        vllm_endpoint="http://vllm.example:8000/v1",
-        model="test-model",
-        master_url="http://hermit:8080",
-        report_secret="s3cr3t",
-        workspace=str(tmp_path),
-        max_prompt_diff_bytes=4096,
-    )
+    values: dict[str, object] = {
+        "job_id": "job1",
+        "git_read_token": "read-token",
+        "repo": "acme/app",
+        "ref": "42",
+        "vllm_endpoint": "http://vllm.example:8000/v1",
+        "model": "test-model",
+        "master_url": "http://hermit:8080",
+        "report_secret": "s3cr3t",
+        "workspace": str(tmp_path),
+        "max_prompt_diff_bytes": 4096,
+    }
+    values.update(overrides)
+    return SlaveSettings(**values)
 
 
 @pytest.mark.asyncio
@@ -436,6 +441,7 @@ async def test_review_retries_once_and_accepts_a_valid_verdict(
     assert "retried finding" in body
     assert len(runners[0].prompts) == 2
     assert "JSON verdict" in runners[0].prompts[1]
+    assert runners[0].timeouts == [None, 300]
 
 
 @pytest.mark.asyncio
@@ -466,6 +472,33 @@ async def test_review_publishes_inconclusive_after_a_failed_retry(
     assert "Model output (tail)" in body
     assert "Still approve" in body
     assert len(runners[0].prompts) == 2
+    assert reported["body"] == body
+
+
+@pytest.mark.asyncio
+async def test_inconclusive_output_tail_can_be_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Operators can keep raw model text out of the public fallback comment."""
+    reported: dict = {}
+
+    async def fake_report(*args) -> None:
+        """Capture the body passed to the real report function."""
+        reported["body"] = args[3]
+
+    monkeypatch.setattr("hermit.slave.clone_and_diff", lambda *a, **k: "+line\n")
+    monkeypatch.setattr("hermit.slave.diff_stat", lambda *a, **k: " file.txt | 1 +")
+    monkeypatch.setattr("hermit.slave.extract_policy", lambda *a, **k: "")
+    monkeypatch.setattr("hermit.slave.stale_references", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "hermit.slave.OpenCodeRunner",
+        lambda *a, **k: _SequenceRunner(["Approve", "Still approve"], **k),
+    )
+    monkeypatch.setattr("hermit.slave.report_review", fake_report)
+    body = await run_review(_slave_settings(tmp_path, review_output_tail_chars=0))
+    assert "**Review inconclusive**" in body
+    assert "Model output (tail)" not in body
+    assert "Still approve" not in body
     assert reported["body"] == body
 
 

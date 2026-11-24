@@ -82,20 +82,46 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_POLICY_FILE_PATH": settings.policy_file_path,
         "HERMIT_MAX_PROMPT_DIFF_BYTES": str(settings.max_prompt_diff_bytes),
         "HERMIT_REVIEW_MAX_STEPS": str(settings.review_max_steps),
+        "HERMIT_REVIEW_OUTPUT_TAIL_CHARS": str(settings.review_output_tail_chars),
         "HERMIT_OPENCODE_BIN": opencode_bin,
+        "HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS": str(
+            settings.opencode_retry_timeout_seconds
+        ),
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,
     }
     if settings.opencode_init_image:
         # The init container copies ripgrep next to opencode; it must come
         # first so the agent's grep/glob tools find the binary.
-        env["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', DEFAULT_PATH)}"
+        env["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH') or DEFAULT_PATH}"
     if settings.review_rules:
         env["HERMIT_REVIEW_RULES"] = settings.review_rules
     if settings.ca_bundle_path:
         for var in CA_TRUST_ENV:
             env[var] = settings.ca_bundle_path
     return env
+
+
+def init_container_command(
+    bin_path: str,
+    rg_path: str = OPENCODE_RG_PATH,
+    bin_dir: str = OPENCODE_BIN_DIR,
+) -> list[str]:
+    """Return the init-container command that stages opencode and ripgrep.
+
+    The shell wrapper keeps the copy executable and tolerates an init image
+    without ripgrep: the reviewer image still ships its own ``rg`` in that
+    case, and the init container must not fail the whole job over an optional
+    search binary.
+    """
+    return [
+        "/bin/sh",
+        "-c",
+        f'cp "$0" {bin_dir}/opencode && '
+        f'if [ -x "$1" ]; then cp "$1" {bin_dir}/rg; fi',
+        bin_path,
+        rg_path,
+    ]
 
 
 class PodSpawner(ABC):
@@ -366,14 +392,7 @@ class K8sPodSpawner(PodSpawner):
                 name="opencode-provider",
                 image=self._settings.opencode_init_image,
                 image_pull_policy=self._settings.opencode_init_image_pull_policy,
-                command=[
-                    "/bin/sh",
-                    "-c",
-                    f'cp "$0" {OPENCODE_BIN_DIR}/opencode && '
-                    f'if [ -x "$1" ]; then cp "$1" {OPENCODE_BIN_DIR}/rg; fi',
-                    self._settings.opencode_init_bin_path,
-                    OPENCODE_RG_PATH,
-                ],
+                command=init_container_command(self._settings.opencode_init_bin_path),
                 volume_mounts=volume_mounts,
                 resources=kubernetes.client.V1ResourceRequirements(
                     **self._settings.opencode_init_resources

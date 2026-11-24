@@ -109,16 +109,20 @@ def test_secrets_tokens_file_is_absent() -> None:
 
 
 def test_configmap_exports_prompt_and_step_budgets() -> None:
-    """The chart forwards the diff cap and the review step budget."""
+    """The chart forwards the diff, retry, output, and step budgets."""
     configmap = _template("configmap.yaml")
     values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
     assert "HERMIT_MAX_PROMPT_DIFF_BYTES" in configmap
     assert "HERMIT_REVIEW_MAX_STEPS" in configmap
+    assert "HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS" in configmap
+    assert "HERMIT_REVIEW_OUTPUT_TAIL_CHARS" in configmap
     assert "maxPromptDiffBytes: 65536" in values
     assert "reviewMaxSteps: 32" in values
+    assert "opencodeRetryTimeoutSeconds: 300" in values
+    assert "reviewOutputTailChars: 1200" in values
 
 
 def test_chart_pins_an_opencode_2_release() -> None:
     """The default init image must provide the schema hermit generates."""
     values = (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
-    assert "ghcr.io/anomalyco/opencode:2." in values
+    assert "ghcr.io/anomalyco/opencode:2.3.2" in values

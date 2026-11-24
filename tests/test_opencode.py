@@ -364,6 +364,37 @@ async def test_opencode_run_spawns_in_repo_dir() -> None:
         assert Path(workspace, "review-prompt.md").exists()
 
 
+def _write_slow_opencode(path: str) -> None:
+    """Write an executable stub that outlives a short per-run timeout."""
+    script = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "import time\n"
+        "if '--version' in sys.argv:\n"
+        "    print('2.3.2')\n"
+        "    raise SystemExit(0)\n"
+        "time.sleep(5)\n"
+    )
+    Path(path).write_text(script, encoding="utf-8")
+    os.chmod(path, 0o755)
+
+
+async def test_opencode_run_uses_the_per_run_timeout() -> None:
+    """The retry path can supply a smaller deadline than the configured one."""
+    with tempfile.TemporaryDirectory() as workspace:
+        bin_path = os.path.join(workspace, "slow-opencode")
+        _write_slow_opencode(bin_path)
+        runner = OpenCodeRunner(
+            bin_path=bin_path,
+            endpoint="http://vllm.example:8000/v1",
+            model="llama-3.1-8b-instruct",
+            workspace=workspace,
+            timeout=900,
+        )
+        with pytest.raises(RuntimeError, match="timed out after 0.1s"):
+            await runner.run("review this", timeout=0.1)
+
+
 async def test_opencode_run_uses_standalone_and_pins_the_agent() -> None:
     """The invocation isolates config and targets the reviewer agent."""
     with (

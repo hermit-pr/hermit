@@ -134,13 +134,16 @@ async def _collect_review(
     prompt: str,
     diff: str,
     ignored_paths: tuple[str, ...],
+    *,
+    retry_timeout: float,
+    output_tail_chars: int,
 ) -> Review:
     """Run the reviewer and turn its answer into a validated review.
 
     A model that ignores the output contract gets one retry with a JSON-only
-    reminder. If it still produces no parseable verdict, the review is
-    inconclusive instead of failing the whole job: the model's answer is a
-    review result, not an infrastructure error.
+    reminder and its own smaller deadline. If it still produces no parseable
+    verdict, the review is inconclusive instead of failing the whole job: the
+    model's answer is a review result, not an infrastructure error.
     """
     output = await runner.run(prompt)
     _log_model_output("review produced", output)
@@ -148,14 +151,23 @@ async def _collect_review(
         return parse_verdict(output, diff, ignored_paths=ignored_paths)
     except VerdictError as exc:
         logger.warning("model output is not a valid verdict: %s", exc)
-        logger.info("retrying opencode once with a JSON-only reminder")
-        retry_output = await runner.run(f"{prompt}\n\n{JSON_ONLY_NUDGE}")
+        logger.info(
+            "retrying opencode once with a JSON-only reminder (timeout=%ss)",
+            retry_timeout,
+        )
+        retry_output = await runner.run(
+            f"{prompt}\n\n{JSON_ONLY_NUDGE}", timeout=retry_timeout
+        )
         _log_model_output("retry produced", retry_output)
         try:
             return parse_verdict(retry_output, diff, ignored_paths=ignored_paths)
         except VerdictError as retry_exc:
             logger.warning("retry produced no valid verdict: %s", retry_exc)
-            return inconclusive_review(retry_output or output, str(retry_exc))
+            return inconclusive_review(
+                retry_output or output,
+                str(retry_exc),
+                tail_chars=output_tail_chars,
+            )
 
 
 async def _publish_review(settings: SlaveSettings, review: Review) -> str:
@@ -241,7 +253,14 @@ async def run_review(settings: SlaveSettings) -> str:
         settings.model,
         settings.review_max_steps,
     )
-    review = await _collect_review(runner, prompt, diff, (policy_path,))
+    review = await _collect_review(
+        runner,
+        prompt,
+        diff,
+        (policy_path,),
+        retry_timeout=settings.opencode_retry_timeout_seconds,
+        output_tail_chars=settings.review_output_tail_chars,
+    )
     return await _publish_review(settings, review)
 
 

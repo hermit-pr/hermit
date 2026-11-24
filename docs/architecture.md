@@ -83,8 +83,10 @@ External systems:
       init container copies `rg` next to the binary and prepends that directory
       to `PATH`, so `grep`/`glob` never fall back to an impossible download in
       an air-gapped cluster. If `rg` is still absent, those tools are not
-      advertised; a model answer without a parseable verdict gets one retry and
-      is then published as `Review inconclusive` with its output tail.
+      advertised; a model answer without a parseable verdict gets one retry
+      with its own shorter deadline (`HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS`)
+      and is then published as `Review inconclusive` with an output tail capped
+      by `HERMIT_REVIEW_OUTPUT_TAIL_CHARS`.
 4. The slave POSTs the resulting review text to the master's internal endpoint
    `/internal/report/<job_id>`, authenticated with the per-review report
    secret (the master reconstructs the job from the durable Secret, so any
@@ -156,14 +158,16 @@ secret classification, completeness, policy compliance) before it may answer
 `Approve`. Findings naming the extracted policy copy are dropped unconditionally:
 that copy is hermit's scratch data, never repository content.
 
-A review without JSON or without a summary is a failure: the job fails, the
-commit status is set to error, and no comment is posted. A review with no
-verified finding is published as `Review inconclusive` instead: an empty
-`Approve` on a diff of 60 changed lines or more, or a `Request changes` whose
-findings were all discarded, must not be presented as an approval or as a silent
-failure. A valid review is rendered as a Summary block, Critical/Medium/Low
-sections, and the verdict; the summary also states how many findings were
-downgraded or discarded by validation.
+A review with no verified finding is published as `Review inconclusive`: an
+empty `Approve` on a diff of 60 changed lines or more, or a `Request changes`
+whose findings were all discarded, must not be presented as an approval. A
+model answer with no parseable verdict is retried once and then published as
+inconclusive too, with its output tail optionally quoted. Inconclusive means
+the review completed and was posted, not that the change was approved: the
+`hermit/review` commit status is green for every published review and error
+only for a bot failure. A valid review is rendered as a Summary block,
+Critical/Medium/Low sections, and the verdict; the summary also states how many
+findings were downgraded or discarded by validation.
 
 The default `HERMIT_REVIEW_RULES` encodes this structure so every review,
 automatic or manual, is formatted identically.
@@ -287,8 +291,10 @@ All environment variables use the `HERMIT_` prefix. Secrets are handled as
 | `HERMIT_POLICY_FILE_PATH` | no | project policy file extracted from the base commit and quoted in the review prompt (default `AGENTS.md`) |
 | `HERMIT_OPCODE_BIN` | no | opencode binary path inside pods |
 | `HERMIT_OPCODE_ARGS` | no | whitespace-separated opencode args |
-| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode binary (default `ghcr.io/anomalyco/opencode:2.1.4`) |
+| `HERMIT_OPCODE_INIT_IMAGE` | no | init container image for opencode and ripgrep binaries (default `ghcr.io/anomalyco/opencode:2.3.2`) |
 | `HERMIT_OPCODE_TIMEOUT_SECONDS` | no | max runtime for the opencode subprocess (default 900) |
+| `HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS` | no | deadline for the single JSON-only retry (default 300) |
+| `HERMIT_REVIEW_OUTPUT_TAIL_CHARS` | no | raw output quoted in an inconclusive review (default 1200; `0` disables) |
 | `HERMIT_MAX_CONCURRENT_JOBS` | no | max reviewer pods in flight per replica (default 20) |
 | `HERMIT_WORKSPACE` | no | working directory opencode runs in (default `/workspace`) |
 | `HERMIT_MASTER_URL` | yes | URL the pods use to reach `/internal/report` |

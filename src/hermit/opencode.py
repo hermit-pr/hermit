@@ -375,7 +375,7 @@ class OpenCodeRunner:
             env["VLLM_API_KEY"] = self._api_key
         return env
 
-    async def run(self, prompt: str) -> str:
+    async def run(self, prompt: str, *, timeout: Optional[float] = None) -> str:
         """Execute opencode with ``prompt`` and return its extracted output.
 
         The prompt is attached with ``--file`` rather than passed as the
@@ -385,9 +385,16 @@ class OpenCodeRunner:
         be larger. The file is still written to the workspace for post-mortem
         debugging.
 
+        Args:
+            prompt: Full review prompt written to ``review-prompt.md``.
+            timeout: Optional per-run deadline in seconds. The configured
+                runner timeout is used when omitted; the retry path passes its
+                smaller budget so two attempts cannot outlive the pod deadline.
+
         Raises:
             RuntimeError: if opencode exits non-zero or emits no text.
         """
+        effective_timeout = self._timeout if timeout is None else timeout
         self._write_config()
         await self._log_version()
         prompt_path = Path(self._workspace) / "review-prompt.md"
@@ -423,12 +430,14 @@ class OpenCodeRunner:
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=self._timeout
+                process.communicate(), timeout=effective_timeout
             )
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            raise RuntimeError(f"opencode timed out after {self._timeout}s") from None
+            raise RuntimeError(
+                f"opencode timed out after {effective_timeout}s"
+            ) from None
         logger.debug("opencode exited with %d", process.returncode)
         raw = stdout.decode("utf-8", errors="replace")
         if stderr:

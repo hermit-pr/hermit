@@ -93,8 +93,13 @@ class Review:
     relaxed: int = 0
 
 
-def inconclusive_review(output: str, reason: str = "") -> Review:
-    """Build an inconclusive review that preserves the failed model output.
+def inconclusive_review(
+    output: str,
+    reason: str = "",
+    *,
+    tail_chars: int = INCONCLUSIVE_OUTPUT_TAIL_CHARS,
+) -> Review:
+    """Build an inconclusive review that optionally preserves model output.
 
     A model that answers in prose is a review result, not an infrastructure
     failure: publishing an inconclusive verdict keeps the review visible and
@@ -103,12 +108,14 @@ def inconclusive_review(output: str, reason: str = "") -> Review:
     Args:
         output: The model output that could not be parsed as a verdict.
         reason: Why parsing failed, shown to the reader.
+        tail_chars: Maximum characters of raw output quoted in the public
+            review; zero omits the quote entirely.
     """
     explanation = "Hermit could not extract a structured verdict from the model output"
     if reason:
         explanation += f" ({reason})"
     explanation += ". This is not an approval."
-    tail = output.strip()[-INCONCLUSIVE_OUTPUT_TAIL_CHARS:]
+    tail = output.strip()[-tail_chars:] if tail_chars > 0 else ""
     if tail:
         quoted = "\n".join(f"> {line}" for line in tail.splitlines())
         explanation += f"\n\nModel output (tail):\n\n{quoted}"
