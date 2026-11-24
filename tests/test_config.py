@@ -133,7 +133,10 @@ def test_prompt_and_review_budget_defaults() -> None:
     """The injected diff cap and the step budget have documented defaults."""
     settings = make_settings()
     assert settings.max_prompt_diff_bytes == 65536
-    assert settings.review_max_steps == 24
+    assert settings.review_max_steps == 32
+    assert settings.opencode_retry_timeout_seconds == 300
+    assert settings.review_output_tail_chars == 1200
+    assert settings.opencode_init_image == "ghcr.io/anomalyco/opencode:2.3.2"
 
 
 def test_prompt_and_review_budget_are_overridable(

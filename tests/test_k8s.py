@@ -1,5 +1,9 @@
 """Tests for the Kubernetes pod spawner."""
 
+import os
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import kubernetes
@@ -8,7 +12,13 @@ import pytest
 from hermit import __version__
 from hermit.config import Settings
 from hermit.jobs import ReviewJob
-from hermit.k8s import JobAlreadyExists, K8sPodSpawner, pod_environment
+from hermit.k8s import (
+    DEFAULT_PATH,
+    JobAlreadyExists,
+    K8sPodSpawner,
+    init_container_command,
+    pod_environment,
+)
 from hermit.models import ChangeEvent
 
 
@@ -68,19 +78,44 @@ def test_pod_environment_includes_version() -> None:
 
 
 def test_pod_environment_forwards_prompt_and_step_budgets() -> None:
-    """The reviewer pod receives the diff cap and the step budget."""
-    settings = make_settings(max_prompt_diff_bytes=2048, review_max_steps=9)
+    """The reviewer pod receives its diff, step, retry, and tail budgets."""
+    settings = make_settings(
+        max_prompt_diff_bytes=2048,
+        review_max_steps=9,
+        opencode_retry_timeout_seconds=120,
+        review_output_tail_chars=0,
+    )
     env = pod_environment(settings, make_job())
     assert env["HERMIT_MAX_PROMPT_DIFF_BYTES"] == "2048"
     assert env["HERMIT_REVIEW_MAX_STEPS"] == "9"
+    assert env["HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS"] == "120"
+    assert env["HERMIT_REVIEW_OUTPUT_TAIL_CHARS"] == "0"
 
 
 def test_pod_environment_with_init_image() -> None:
-    """pod_environment uses mounted path when init image is set."""
+    """pod_environment uses the mounted path and searches it first."""
     settings = make_settings(opencode_init_image="ghcr.io/anomalyco/opencode:latest")
     job = make_job()
     env = pod_environment(settings, job)
     assert env["HERMIT_OPENCODE_BIN"] == "/opencode-bin/opencode"
+    assert env["PATH"].startswith("/opencode-bin:")
+
+
+def test_pod_environment_without_init_image_leaves_path_untouched() -> None:
+    """Without an init container the image's own PATH and rg are used."""
+    settings = make_settings(opencode_init_image="")
+    env = pod_environment(settings, make_job())
+    assert "PATH" not in env
+
+
+def test_pod_environment_uses_default_path_when_path_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty PATH must not produce a trailing ':' entry."""
+    monkeypatch.setenv("PATH", "")
+    settings = make_settings()
+    env = pod_environment(settings, make_job())
+    assert env["PATH"] == f"/opencode-bin:{DEFAULT_PATH}"
 
 
 def test_pod_environment_sets_ca_trust_env_when_configured() -> None:
@@ -364,9 +399,12 @@ async def test_k8s_spawner_adds_init_container_when_enabled() -> None:
         assert init_container.name == "opencode-provider"
         assert init_container.image == "ghcr.io/anomalyco/opencode:latest"
         assert init_container.command == [
-            "cp",
+            "/bin/sh",
+            "-c",
+            'cp "$0" /opencode-bin/opencode && '
+            'if [ -x "$1" ]; then cp "$1" /opencode-bin/rg; fi',
             "/usr/local/bin/opencode",
-            "/opencode-bin/opencode",
+            "/usr/bin/rg",
         ]
 
         # Check volume mount on init container
@@ -455,7 +493,59 @@ async def test_k8s_spawner_custom_init_image_and_bin_path() -> None:
         init_container = pod.spec.init_containers[0]
         assert init_container.image == "my-registry/opencode:v1.0"
         assert init_container.command == [
-            "cp",
+            "/bin/sh",
+            "-c",
+            'cp "$0" /opencode-bin/opencode && '
+            'if [ -x "$1" ]; then cp "$1" /opencode-bin/rg; fi',
             "/custom/path/opencode",
-            "/opencode-bin/opencode",
+            "/usr/bin/rg",
         ]
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="sh is not installed")
+def test_init_container_command_copies_both_binaries(tmp_path: Path) -> None:
+    """The generated shell command really stages opencode and rg."""
+    source = tmp_path / "source"
+    destination = tmp_path / "bin"
+    source.mkdir()
+    destination.mkdir()
+    bin_path = source / "opencode"
+    rg_path = source / "rg"
+    bin_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    rg_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(bin_path, 0o755)
+    os.chmod(rg_path, 0o755)
+
+    subprocess.run(
+        init_container_command(str(bin_path), str(rg_path), str(destination)),
+        check=True,
+    )
+
+    assert (destination / "opencode").read_text(encoding="utf-8") == (
+        "#!/bin/sh\nexit 0\n"
+    )
+    assert (destination / "rg").read_text(encoding="utf-8") == "#!/bin/sh\nexit 0\n"
+    assert os.access(destination / "opencode", os.X_OK)
+    assert os.access(destination / "rg", os.X_OK)
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="sh is not installed")
+def test_init_container_command_tolerates_missing_ripgrep(tmp_path: Path) -> None:
+    """An init image without rg still stages opencode and exits successfully."""
+    source = tmp_path / "source"
+    destination = tmp_path / "bin"
+    source.mkdir()
+    destination.mkdir()
+    bin_path = source / "opencode"
+    bin_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(bin_path, 0o755)
+
+    subprocess.run(
+        init_container_command(
+            str(bin_path), str(source / "missing-rg"), str(destination)
+        ),
+        check=True,
+    )
+
+    assert (destination / "opencode").exists()
+    assert not (destination / "rg").exists()

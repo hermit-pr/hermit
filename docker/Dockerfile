@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.description="H.E.R.M.I.T — airgapped code-revie
 
 RUN addgroup -S hermit \
     && adduser -S -G hermit -h /app hermit \
-    && apk add --no-cache git libstdc++ libgcc \
+    && apk add --no-cache git libstdc++ libgcc ripgrep \
     && if [ "$INSTALL_OPENCODE" = "true" ]; then \
          apk add --no-cache nodejs npm \
          && npm install -g opencode-ai; \

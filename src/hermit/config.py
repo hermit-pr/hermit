@@ -14,6 +14,10 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GitProvider = Literal["github", "gitlab"]
+DEFAULT_REVIEW_MAX_STEPS = 32
+DEFAULT_OPENCODE_INIT_IMAGE = "ghcr.io/anomalyco/opencode:2.3.2"
+DEFAULT_OPENCODE_RETRY_TIMEOUT_SECONDS = 300
+DEFAULT_REVIEW_OUTPUT_TAIL_CHARS = 1200
 
 DEFAULT_REVIEW_RULES = (
     "You are a code reviewer. Answer with exactly ONE JSON code block and "
@@ -240,7 +244,7 @@ class Settings(_SettingsBase):
     opencode_args: List[str] = Field(
         default_factory=lambda: ["run", "--auto", "--format", "json"]
     )
-    opencode_init_image: str = "ghcr.io/anomalyco/opencode:2.1.4"
+    opencode_init_image: str = DEFAULT_OPENCODE_INIT_IMAGE
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_init_image_pull_policy: str = "IfNotPresent"
     opencode_init_resources: dict = Field(
@@ -250,8 +254,10 @@ class Settings(_SettingsBase):
         }
     )
     opencode_timeout_seconds: int = 900
+    opencode_retry_timeout_seconds: int = DEFAULT_OPENCODE_RETRY_TIMEOUT_SECONDS
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 24
+    review_max_steps: int = DEFAULT_REVIEW_MAX_STEPS
+    review_output_tail_chars: int = DEFAULT_REVIEW_OUTPUT_TAIL_CHARS
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -385,11 +391,13 @@ class SlaveSettings(_SettingsBase):
     opencode_args: List[str] = Field(
         default_factory=lambda: ["run", "--auto", "--format", "json"]
     )
-    opencode_init_image: str = "ghcr.io/anomalyco/opencode:2.1.4"
+    opencode_init_image: str = DEFAULT_OPENCODE_INIT_IMAGE
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_timeout_seconds: int = 900
+    opencode_retry_timeout_seconds: int = DEFAULT_OPENCODE_RETRY_TIMEOUT_SECONDS
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 24
+    review_max_steps: int = DEFAULT_REVIEW_MAX_STEPS
+    review_output_tail_chars: int = DEFAULT_REVIEW_OUTPUT_TAIL_CHARS
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

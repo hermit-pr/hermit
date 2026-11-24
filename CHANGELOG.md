@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-11-24
+
+### Fixed
+
+- **The reviewer sandbox has `ripgrep`.** The opencode init container copied
+  only the `opencode` binary into the shared volume, so `grep` and `glob`
+  failed on every call ("ripgrep execution failed") and the agent looped until
+  it exhausted its step budget. The init container now also copies `/usr/bin/rg`
+  next to the binary, `/opencode-bin` is prepended to the reviewer's `PATH`, and
+  the reviewer image installs `ripgrep` as a fallback. When `rg` is still
+  unavailable, `grep` and `glob` are no longer advertised, so a broken tool
+  cannot consume the step budget.
+- **A malformed model answer no longer fails the whole review.** Output with no
+  parseable JSON verdict is retried once with a short JSON-only reminder and a
+  separate, shorter deadline (`HERMIT_OPENCODE_RETRY_TIMEOUT_SECONDS`, default
+  300 s) so two attempts cannot outlive the reviewer pod. If the retry also
+  fails, hermit publishes `Review inconclusive` instead of a red `Review failed`
+  status; the raw output quoted there is capped by
+  `HERMIT_REVIEW_OUTPUT_TAIL_CHARS` (default 1200, `0` disables it). The failure
+  body also keeps the output size, NDJSON event histogram, last event types, and
+  the first/last characters of the output, so the evidence survives the pod.
+- **An empty diff is "nothing to review", not an error.** A change merged before
+  the review runs produces no diff against the current target branch; it is now
+  published as an inconclusive review with a successful commit status.
+  `Review inconclusive` means the review completed and was posted, never that
+  the change was approved.
+- **The default review step budget is 32** (was 24), the default opencode init
+  image is now 2.3.2, and the `skill` tool exposed by that release is explicitly
+  denied instead of wasting a step on "Unable to load skill none".
+
 ## [0.4.3] - 2026-11-04
 
 ### Fixed

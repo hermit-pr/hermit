@@ -42,6 +42,9 @@ VALID_VERDICTS = (APPROVE, REQUEST_CHANGES, INCONCLUSIVE)
 #: zero findings: an empty result is then an unverified result.
 INCONCLUSIVE_MIN_CHANGED_LINES = 60
 
+#: Maximum characters of model output quoted in an inconclusive review.
+INCONCLUSIVE_OUTPUT_TAIL_CHARS = 1200
+
 _SEVERITY_ALIASES = {
     "critical": "critical",
     "blocker": "critical",
@@ -88,6 +91,54 @@ class Review:
     verdict: str
     dropped: int = 0
     relaxed: int = 0
+
+
+def inconclusive_review(
+    output: str,
+    reason: str = "",
+    *,
+    tail_chars: int = INCONCLUSIVE_OUTPUT_TAIL_CHARS,
+) -> Review:
+    """Build an inconclusive review that optionally preserves model output.
+
+    A model that answers in prose is a review result, not an infrastructure
+    failure: publishing an inconclusive verdict keeps the review visible and
+    the commit status neutral instead of losing the evidence with the pod.
+
+    Args:
+        output: The model output that could not be parsed as a verdict.
+        reason: Why parsing failed, shown to the reader.
+        tail_chars: Maximum characters of raw output quoted in the public
+            review; zero omits the quote entirely.
+    """
+    explanation = "Hermit could not extract a structured verdict from the model output"
+    if reason:
+        explanation += f" ({reason})"
+    explanation += ". This is not an approval."
+    tail = output.strip()[-tail_chars:] if tail_chars > 0 else ""
+    if tail:
+        quoted = "\n".join(f"> {line}" for line in tail.splitlines())
+        explanation += f"\n\nModel output (tail):\n\n{quoted}"
+    return Review(summary=explanation, findings=(), verdict=INCONCLUSIVE)
+
+
+def nothing_to_review() -> Review:
+    """Return the neutral review published when base and head have no diff.
+
+    A change that was already merged produces an empty diff against the current
+    target branch. That is a fact about the review, not a bot failure: publish
+    it as inconclusive so the commit status stays green and no review is
+    silently missing.
+    """
+    return Review(
+        summary=(
+            "Nothing to review: the target branch and the proposed head have "
+            "no diff. The change may already have been merged. This is not an "
+            "approval."
+        ),
+        findings=(),
+        verdict=INCONCLUSIVE,
+    )
 
 
 def _normalize_file(path: str) -> str:

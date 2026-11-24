@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -15,12 +16,13 @@ from hermit.opencode import (
     PROVIDER_PACKAGE,
     OpenCodeRunner,
     extract_text,
+    output_diagnostic,
     permission_rules,
     policy_rules,
 )
 
 
-def _run(opencode_opts: dict) -> dict:
+def _run(opencode_opts: dict, *, search: bool = True) -> dict:
     """Generate and read back the opencode config for the given options."""
     with tempfile.TemporaryDirectory() as tmp:
         runner = OpenCodeRunner(
@@ -30,7 +32,9 @@ def _run(opencode_opts: dict) -> dict:
             workspace=tmp,
             **opencode_opts,
         )
-        runner._write_config()  # pylint: disable=protected-access
+        which = "/usr/bin/rg" if search else None
+        with patch("hermit.opencode.shutil.which", return_value=which):
+            runner._write_config()  # pylint: disable=protected-access
         config_path = Path(tmp) / "opencode.json"
         assert config_path.exists()
         return json.loads(config_path.read_text(encoding="utf-8"))
@@ -127,6 +131,17 @@ def test_opencode_config_allows_read_only_discovery() -> None:
         ]
 
 
+def test_opencode_config_omits_broken_search_tools() -> None:
+    """Without ripgrep the agent is not offered grep/glob that always fail."""
+    config = _run({}, search=False)
+    assert _rules(config, "read") == [
+        {"action": "read", "resource": "*", "effect": "allow"}
+    ]
+    assert _rules(config, "grep") == []
+    assert _rules(config, "glob") == []
+    assert config["agents"][AGENT_NAME]["permissions"] == config["permissions"]
+
+
 def test_opencode_config_shell_allowlist_is_read_only() -> None:
     """Only the documented read-only git commands may run in the shell."""
     config = _run({})
@@ -160,6 +175,11 @@ def test_opencode_config_shell_policies_cannot_be_overridden() -> None:
     assert {
         "action": "tool.use",
         "resource": "execute:*",
+        "effect": "deny",
+    } in policies
+    assert {
+        "action": "tool.use",
+        "resource": "skill:*",
         "effect": "deny",
     } in policies
 
@@ -344,6 +364,37 @@ async def test_opencode_run_spawns_in_repo_dir() -> None:
         assert Path(workspace, "review-prompt.md").exists()
 
 
+def _write_slow_opencode(path: str) -> None:
+    """Write an executable stub that outlives a short per-run timeout."""
+    script = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "import time\n"
+        "if '--version' in sys.argv:\n"
+        "    print('2.3.2')\n"
+        "    raise SystemExit(0)\n"
+        "time.sleep(5)\n"
+    )
+    Path(path).write_text(script, encoding="utf-8")
+    os.chmod(path, 0o755)
+
+
+async def test_opencode_run_uses_the_per_run_timeout() -> None:
+    """The retry path can supply a smaller deadline than the configured one."""
+    with tempfile.TemporaryDirectory() as workspace:
+        bin_path = os.path.join(workspace, "slow-opencode")
+        _write_slow_opencode(bin_path)
+        runner = OpenCodeRunner(
+            bin_path=bin_path,
+            endpoint="http://vllm.example:8000/v1",
+            model="llama-3.1-8b-instruct",
+            workspace=workspace,
+            timeout=900,
+        )
+        with pytest.raises(RuntimeError, match="timed out after 0.1s"):
+            await runner.run("review this", timeout=0.1)
+
+
 async def test_opencode_run_uses_standalone_and_pins_the_agent() -> None:
     """The invocation isolates config and targets the reviewer agent."""
     with (
@@ -369,6 +420,23 @@ async def test_opencode_run_uses_standalone_and_pins_the_agent() -> None:
             Path(workspace) / "review-prompt.md"
         )
         assert argv[-1] == "Review the pull request in the attached file."
+
+
+def test_output_diagnostic_summarizes_events_and_edges() -> None:
+    """A failed run keeps its size, event types, and output edges."""
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "step_start"}),
+            json.dumps({"type": "tool_use", "tool": "grep"}),
+            json.dumps({"type": "tool_use", "tool": "read"}),
+            json.dumps({"type": "text", "part": {"type": "text", "text": "x"}}),
+        ]
+    )
+    diagnostic = output_diagnostic(stdout)
+    assert "event types: step_start=1, tool_use=2, text=1" in diagnostic
+    assert "last events: step_start, tool_use, tool_use, text" in diagnostic
+    assert "first 300 chars" in diagnostic
+    assert "last 300 chars" in diagnostic
 
 
 def test_extract_text_accumulates_fragments_by_message() -> None:
