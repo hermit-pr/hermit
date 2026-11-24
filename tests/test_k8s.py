@@ -76,11 +76,19 @@ def test_pod_environment_forwards_prompt_and_step_budgets() -> None:
 
 
 def test_pod_environment_with_init_image() -> None:
-    """pod_environment uses mounted path when init image is set."""
+    """pod_environment uses the mounted path and searches it first."""
     settings = make_settings(opencode_init_image="ghcr.io/anomalyco/opencode:latest")
     job = make_job()
     env = pod_environment(settings, job)
     assert env["HERMIT_OPENCODE_BIN"] == "/opencode-bin/opencode"
+    assert env["PATH"].startswith("/opencode-bin:")
+
+
+def test_pod_environment_without_init_image_leaves_path_untouched() -> None:
+    """Without an init container the image's own PATH and rg are used."""
+    settings = make_settings(opencode_init_image="")
+    env = pod_environment(settings, make_job())
+    assert "PATH" not in env
 
 
 def test_pod_environment_sets_ca_trust_env_when_configured() -> None:
@@ -364,9 +372,12 @@ async def test_k8s_spawner_adds_init_container_when_enabled() -> None:
         assert init_container.name == "opencode-provider"
         assert init_container.image == "ghcr.io/anomalyco/opencode:latest"
         assert init_container.command == [
-            "cp",
+            "/bin/sh",
+            "-c",
+            'cp "$0" /opencode-bin/opencode && '
+            'if [ -x "$1" ]; then cp "$1" /opencode-bin/rg; fi',
             "/usr/local/bin/opencode",
-            "/opencode-bin/opencode",
+            "/usr/bin/rg",
         ]
 
         # Check volume mount on init container
@@ -455,7 +466,10 @@ async def test_k8s_spawner_custom_init_image_and_bin_path() -> None:
         init_container = pod.spec.init_containers[0]
         assert init_container.image == "my-registry/opencode:v1.0"
         assert init_container.command == [
-            "cp",
+            "/bin/sh",
+            "-c",
+            'cp "$0" /opencode-bin/opencode && '
+            'if [ -x "$1" ]; then cp "$1" /opencode-bin/rg; fi',
             "/custom/path/opencode",
-            "/opencode-bin/opencode",
+            "/usr/bin/rg",
         ]

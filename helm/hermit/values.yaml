@@ -75,7 +75,7 @@ config:
   # Cap on the diff injected into the review prompt (UTF-8 bytes).
   maxPromptDiffBytes: 65536
   # Maximum number of model steps per review (opencode agent `steps`).
-  reviewMaxSteps: 24
+  reviewMaxSteps: 32
   maxConcurrentJobs: 20
   maxBodyBytes: 10485760
   rateLimitPerIp: 60

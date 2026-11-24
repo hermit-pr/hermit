@@ -14,6 +14,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GitProvider = Literal["github", "gitlab"]
+DEFAULT_REVIEW_MAX_STEPS = 32
 
 DEFAULT_REVIEW_RULES = (
     "You are a code reviewer. Answer with exactly ONE JSON code block and "
@@ -251,7 +252,7 @@ class Settings(_SettingsBase):
     )
     opencode_timeout_seconds: int = 900
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 24
+    review_max_steps: int = DEFAULT_REVIEW_MAX_STEPS
     workspace: str = "/workspace"
 
     master_url: str = Field(..., description="URL reviewer pods use to report back")
@@ -389,7 +390,7 @@ class SlaveSettings(_SettingsBase):
     opencode_init_bin_path: str = "/usr/local/bin/opencode"
     opencode_timeout_seconds: int = 900
     max_prompt_diff_bytes: int = 65536
-    review_max_steps: int = 24
+    review_max_steps: int = DEFAULT_REVIEW_MAX_STEPS
     workspace: str = "/workspace"
     master_url: str
     report_secret: SecretStr

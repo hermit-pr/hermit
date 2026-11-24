@@ -16,10 +16,11 @@ import json
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
-from hermit.config import DEFAULT_REVIEW_RULES
+from hermit.config import DEFAULT_REVIEW_MAX_STEPS, DEFAULT_REVIEW_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ MODEL_TEMPERATURE = 0.1
 TOOL_OUTPUT_MAX_LINES = 400
 TOOL_OUTPUT_MAX_BYTES = 16384
 REVIEW_MESSAGE = "Review the pull request in the attached file."
+DIAGNOSTIC_CHARS = 300
+DIAGNOSTIC_EVENTS = 10
 
 #: Read-only shell commands the reviewer may run.  OpenCode 2 matches the
 #: ``resource`` against the scanned command string and a trailing ``" *"`` also
@@ -54,7 +57,9 @@ SHELL_ALLOWLIST: tuple[str, ...] = (
 )
 
 #: Actions hard-denied to the reviewer.  ``edit`` covers write/patch,
-#: ``subagent`` covers child agents, ``execute`` covers Code Mode.
+#: ``subagent`` covers child agents, ``execute`` covers Code Mode, and ``skill``
+#: covers the 2.3.x skill loader (which otherwise answers "Unable to load skill
+#: none" and burns a step).
 DENIED_ACTIONS: tuple[str, ...] = (
     "edit",
     "webfetch",
@@ -63,6 +68,7 @@ DENIED_ACTIONS: tuple[str, ...] = (
     "question",
     "execute",
     "external_directory",
+    "skill",
 )
 
 
@@ -74,15 +80,21 @@ def shell_rules() -> list[dict[str, str]]:
     ]
 
 
-def permission_rules() -> list[dict[str, str]]:
+def permission_rules(*, search: bool = True) -> list[dict[str, str]]:
     """Return the ordered permission rules for the reviewer agent.
 
     The first rule denies everything; later rules re-allow read-only discovery
     tools and the shell allowlist.  OpenCode resolves the *last* matching rule,
     so ordering matters and the deny-by-default rule must stay first.
+
+    Args:
+        search: Whether ``grep`` and ``glob`` can work in this sandbox.  They
+            are omitted when ripgrep is missing: advertising a tool that always
+            fails costs the agent several steps before it gives up.
     """
     rules = [{"action": "*", "resource": "*", "effect": "deny"}]
-    for action in ("read", "glob", "grep"):
+    actions = ("read", "glob", "grep") if search else ("read",)
+    for action in actions:
         rules.append({"action": action, "resource": "*", "effect": "allow"})
     rules.extend(shell_rules())
     return rules
@@ -180,6 +192,36 @@ def extract_text(stdout: str) -> str:
     return result
 
 
+def output_diagnostic(stdout: str) -> str:
+    """Summarize opencode NDJSON output for a failure report.
+
+    Reviewer pods are ephemeral and their logs are often gone before an
+    operator can read them. The diagnostic keeps the output size, the event
+    histogram, the last event types, and the first/last characters in the
+    failure body the master already stores.
+    """
+    event_types: list[str] = []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type"):
+            event_types.append(str(event["type"]))
+    counts: dict[str, int] = {}
+    for event_type in event_types:
+        counts[event_type] = counts.get(event_type, 0) + 1
+    histogram = ", ".join(f"{kind}={count}" for kind, count in counts.items())
+    recent = ", ".join(event_types[-DIAGNOSTIC_EVENTS:])
+    stripped = stdout.strip()
+    return (
+        f"stdout: {len(stdout)} bytes; event types: {histogram or 'none'}; "
+        f"last events: {recent or 'none'}; "
+        f"first {DIAGNOSTIC_CHARS} chars: {stripped[:DIAGNOSTIC_CHARS]!r}; "
+        f"last {DIAGNOSTIC_CHARS} chars: {stripped[-DIAGNOSTIC_CHARS:]!r}"
+    )
+
+
 class OpenCodeRunner:
     """Runs opencode against a vLLM endpoint for a given prompt."""
 
@@ -195,7 +237,7 @@ class OpenCodeRunner:
         review_rules: str = "",
         timeout: int = 900,
         cwd: Optional[str] = None,
-        max_steps: int = 24,
+        max_steps: int = DEFAULT_REVIEW_MAX_STEPS,
     ) -> None:
         self._bin = bin_path
         self._endpoint = endpoint
@@ -227,6 +269,13 @@ class OpenCodeRunner:
         agent_prompt = DEFAULT_REVIEW_RULES
         if self._review_rules:
             agent_prompt += "\n" + self._review_rules
+        search_available = shutil.which("rg") is not None
+        if not search_available:
+            logger.warning(
+                "ripgrep (rg) is not on PATH; grep and glob are disabled for "
+                "this review"
+            )
+        permissions = permission_rules(search=search_available)
         config: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "model": f"{PROVIDER_ID}/{self._model}",
@@ -239,7 +288,7 @@ class OpenCodeRunner:
             },
             "plugins": ["-opencode.provider.vllm"],
             "policies": policy_rules(),
-            "permissions": permission_rules(),
+            "permissions": permissions,
             "providers": {
                 PROVIDER_ID: {
                     "name": "H.E.R.M.I.T vLLM",
@@ -275,7 +324,7 @@ class OpenCodeRunner:
                     "steps": self._max_steps,
                     "model": f"{PROVIDER_ID}/{self._model}#{MODEL_VARIANT}",
                     "system": agent_prompt,
-                    "permissions": permission_rules(),
+                    "permissions": permissions,
                 },
                 # The hidden title agent would spend an extra model call per
                 # review just to name a headless session.
@@ -381,16 +430,17 @@ class OpenCodeRunner:
             await process.wait()
             raise RuntimeError(f"opencode timed out after {self._timeout}s") from None
         logger.debug("opencode exited with %d", process.returncode)
+        raw = stdout.decode("utf-8", errors="replace")
         if stderr:
             logger.debug("opencode stderr: %s", stderr.decode(errors="replace"))
         if process.returncode != 0:
             message = stderr.decode(errors="replace").strip()
             logger.error("opencode failed: %s", message[-4000:])
             raise RuntimeError(
-                f"opencode failed with exit {process.returncode}: {message}"
+                f"opencode failed with exit {process.returncode}: {message}\n"
+                f"{output_diagnostic(raw)}"
             )
         logger.info("opencode completed; output %d bytes", len(stdout))
-        raw = stdout.decode("utf-8")
         logger.info("opencode raw output (%d bytes)\n%s", len(raw), raw[-8000:])
         try:
             log_path = os.path.join(
@@ -406,7 +456,10 @@ class OpenCodeRunner:
                     logger.info("opencode internal log:\n%s", lf.read()[-8000:])
         except OSError:
             pass
-        return extract_text(raw)
+        try:
+            return extract_text(raw)
+        except RuntimeError as exc:
+            raise RuntimeError(f"{exc}\n{output_diagnostic(raw)}") from exc
 
     async def _log_version(self) -> None:
         """Log the opencode version, warning when it predates the 2.x schema."""

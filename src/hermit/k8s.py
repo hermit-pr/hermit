@@ -11,6 +11,7 @@ restarts. A background sweep reclaims orphaned pods and Secrets.
 import asyncio
 import base64
 import logging
+import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -40,6 +41,9 @@ JOB_APP_LABEL = "app"
 JOB_APP_VALUE = "hermit-review"
 JOB_LABEL_KEY = "hermit.job"
 SWEEP_INTERVAL_SECONDS = 300
+OPENCODE_BIN_DIR = "/opencode-bin"
+OPENCODE_RG_PATH = "/usr/bin/rg"
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CA_VOLUME_NAME = "ca-bundle"
 CA_TRUST_ENV = (
     "SSL_CERT_FILE",
@@ -58,7 +62,7 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
     """Return the non-secret environment variables for a reviewer pod."""
     opencode_bin = settings.opencode_bin
     if settings.opencode_init_image:
-        opencode_bin = "/opencode-bin/opencode"
+        opencode_bin = f"{OPENCODE_BIN_DIR}/opencode"
     env = {
         "HOME": "/home/hermit",
         "HERMIT_JOB_ID": job.id,
@@ -82,6 +86,10 @@ def pod_environment(settings: Settings, job: ReviewJob) -> dict[str, str]:
         "HERMIT_WORKSPACE": settings.workspace,
         "HERMIT_MASTER_URL": settings.master_url,
     }
+    if settings.opencode_init_image:
+        # The init container copies ripgrep next to opencode; it must come
+        # first so the agent's grep/glob tools find the binary.
+        env["PATH"] = f"{OPENCODE_BIN_DIR}:{os.environ.get('PATH', DEFAULT_PATH)}"
     if settings.review_rules:
         env["HERMIT_REVIEW_RULES"] = settings.review_rules
     if settings.ca_bundle_path:
@@ -345,7 +353,7 @@ class K8sPodSpawner(PodSpawner):
             volume_mounts = [
                 kubernetes.client.V1VolumeMount(
                     name="opencode-bin",
-                    mount_path="/opencode-bin",
+                    mount_path=OPENCODE_BIN_DIR,
                 )
             ]
             volumes = [
@@ -359,9 +367,12 @@ class K8sPodSpawner(PodSpawner):
                 image=self._settings.opencode_init_image,
                 image_pull_policy=self._settings.opencode_init_image_pull_policy,
                 command=[
-                    "cp",
+                    "/bin/sh",
+                    "-c",
+                    f'cp "$0" {OPENCODE_BIN_DIR}/opencode && '
+                    f'if [ -x "$1" ]; then cp "$1" {OPENCODE_BIN_DIR}/rg; fi',
                     self._settings.opencode_init_bin_path,
-                    "/opencode-bin/opencode",
+                    OPENCODE_RG_PATH,
                 ],
                 volume_mounts=volume_mounts,
                 resources=kubernetes.client.V1ResourceRequirements(

@@ -10,6 +10,8 @@ from hermit.verdict import (
     INCONCLUSIVE,
     REQUEST_CHANGES,
     VerdictError,
+    inconclusive_review,
+    nothing_to_review,
     parse_verdict,
     render_markdown,
 )
@@ -450,9 +452,31 @@ def test_parse_verdict_rejects_malformed_json() -> None:
 
 
 def test_parse_verdict_rejects_missing_json() -> None:
-    """Prose without a JSON verdict is a failed review."""
+    """Prose without a JSON verdict is not parseable as a review."""
     with pytest.raises(VerdictError, match="no JSON verdict"):
         parse_verdict("Approve, nothing to report.", DIFF)
+
+
+def test_inconclusive_review_keeps_the_model_output_tail() -> None:
+    """Unparseable prose is published with its evidence, not thrown away."""
+    review = inconclusive_review("Approve, nothing to report.", "no JSON verdict")
+    assert review.verdict == INCONCLUSIVE
+    assert not review.findings
+    assert "no JSON verdict" in review.summary
+    assert "Approve, nothing to report." in review.summary
+    markdown = render_markdown(review)
+    assert "**Review inconclusive**" in markdown
+    assert "Model output (tail)" in markdown
+
+
+def test_nothing_to_review_is_a_neutral_inconclusive_result() -> None:
+    """An empty diff is a review result, not a bot failure."""
+    review = nothing_to_review()
+    assert review.verdict == INCONCLUSIVE
+    assert not review.findings
+    markdown = render_markdown(review)
+    assert "Nothing to review" in markdown
+    assert "**Review inconclusive**" in markdown
 
 
 def test_render_markdown_orders_sections() -> None:

@@ -79,7 +79,12 @@ External systems:
       read-only discovery plus an inspection-only shell allowlist, and bounds
       the run with a `steps` budget (`HERMIT_REVIEW_MAX_STEPS`); every run uses
       `--standalone` so a configuration shipped by the reviewed repository
-      cannot override it.
+      cannot override it. The reviewer image ships `ripgrep`, and the opencode
+      init container copies `rg` next to the binary and prepends that directory
+      to `PATH`, so `grep`/`glob` never fall back to an impossible download in
+      an air-gapped cluster. If `rg` is still absent, those tools are not
+      advertised; a model answer without a parseable verdict gets one retry and
+      is then published as `Review inconclusive` with its output tail.
 4. The slave POSTs the resulting review text to the master's internal endpoint
    `/internal/report/<job_id>`, authenticated with the per-review report
    secret (the master reconstructs the job from the durable Secret, so any
